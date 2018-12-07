@@ -1,2 +1,2 @@
-# cohoSS
-Oregon Coastal Coho state space modesl
+# coastalCohoSS
+Oregon Coastal Coho state space modes
