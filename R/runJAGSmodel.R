@@ -5,7 +5,7 @@ runJAGSmodel <- function(bMod, dat, priors, calcInits, MCMCsims=10000, projectio
   require(R2jags)
 
   saveList <- c("prod","cap","capSlope","yearEffect","oceanSurv","oceanSurvPopL",
-                "sexRatio","sexRatioPopL","smolt","escapement","spawnersWild")
+                "sexRatio","sexRatioPopL","smolt","escapement","spawnersWild","SRresidSD")
 
   # write the model to the local directory
   writeLines(bMod,con="bMod.txt") # writeLine seems to work best (cat, and write gave truncated results)
