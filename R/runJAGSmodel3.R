@@ -1,14 +1,12 @@
 # a function to to run the JAGS model
 #' @export
-runJAGSmodel <- function(bMod, dat, priors, calcInits, MCMCsims=10000, projection=FALSE){
+runJAGSmodel3 <- function(bMod, dat, priors, calcInits, MCMCsims=10000, projection=FALSE){
 
   require(R2jags)
 
-  saveList <- c("prod","cap","capSlope","yearEffect","yearEffectTau",
+  saveList <- c("prod","cap","capSlope","yearEffect","yearEffectOS","oceanSurv","oceanSurvPopL",
                 "smolt","escapement","spawnersWild","SRresidSD")
 
-  if("smoltObs" %in% names(dat$jagsDat)) saveList <- c(saveList,"oceanSurv","oceanSurvPopL","yearEffectOS","yearEffectTauOS")
-    
   # write the model to the local directory
   writeLines(bMod,con="bMod.txt") # writeLine seems to work best (cat, and write gave truncated results)
 

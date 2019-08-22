@@ -10,35 +10,24 @@
 ####################################################
 # WHAT I NEED TO DO NEXT
 ####################################################
-createInitValsFunc <- function(dat, includePlots=FALSE){
+createInitValsFuncOld <- function(dat, includePlots=FALSE){
   bdat <- dat$jagsDat
-  sites <- dat$siteNames
   popNames <- tapply(names(bdat$stock),list(bdat$stock),unique)
   function(){
     logit <- function(x) log(x/(1-x))
     invLogit <- function(x) 1/(1+exp(-x))
-    
-    smDat <- "smoltObs" %in% names(bdat)
 
     ##### expand the observation data to include all combinations
     #####   of years and populations so it matches the parameters
     edat <- expandAllData(bdat)
 
     #####  spawners to trap model (prepare values) #####
-    spawners <- edat$escapementObs
-    Rtemp <- spawners/(1-edat$HR)/edat$oceanSurv
-    smolt <- rep(NA,length(spawners))
-    if(smDat){
-      smolt <- edat$smoltObs
-    } else {
-      for(i in 1:length(sites)){
-        smolt[bdat$stock==i] <- c(Rtemp[bdat$stock==i][-(1:3)],rep(NA,3))
-      }
-    }
+    spawners <- edat$escapementFemObs
+    smolt <- edat$smoltObs
     habVar <- bdat$habVar
 
     ##### estimate the SR params #####
-    srF <- function(p,ss) ss/(1/p[1]^3 + ss^3/p[2]^3)^(1/3)
+    srF <- function(p,ss) ss/(1/p[1] + ss/p[2])
     fitBH <- function(ss,rr){
       ssq <- function(pp,ss,rr){
         p <- exp(pp)
@@ -53,25 +42,19 @@ createInitValsFunc <- function(dat, includePlots=FALSE){
     srDat <- data.frame(S=escDat/habDat, R=smolt/habDat, stock=edat$stock)
     srDat <- srDat[!is.na(srDat$S) & !is.na(srDat$R),] # remove NAs
     srParams <- array(NA,dim=c(bdat$Npops,2))
-    
     if(includePlots){
       windows(10,10)
-      if(smDat){
-        par(mfrow=c(3,2))
-      }else {
-        par(mfrow=c(5,5))
-      }
-        
+      par(mfrow=c(3,2))
       xx <- 0:round(max(srDat$S))
     }
+    xLim <- c(0,max(srDat$S))
+    yLim <- c(0,max(srDat$R))
     for(st in 1:bdat$Npops){
       sInd <- srDat$stock==st
-      xLim <- c(0,max(srDat$S[sInd]))
-      yLim <- c(0,max(srDat$R[sInd]))
       r1 <- fitBH(srDat$S[sInd],srDat$R[sInd])
       srParams[st,] <- exp(r1$estimate)
       if(includePlots){
-        plot(srDat$S[sInd],srDat$R[sInd],pch=16,col="black",xlab="Spawners",ylab="Smolt",bty="l",main=popNames[st],xlim=xLim,ylim=yLim)
+        plot(srDat$S[sInd],srDat$R[sInd],pch=16,col="black",xlab="S/PEU",ylab="Parr/PEU",bty="l",main=popNames[st],xlim=xLim,ylim=yLim)
         lines(xx,srF(exp(r1$estimate),ss=xx),lwd=2,col=rgb(0.2,0.8,0.2,0.5))
         grid()
       }
@@ -82,7 +65,7 @@ createInitValsFunc <- function(dat, includePlots=FALSE){
     prod <- srParams[,1]
     cap <- srParams[,2]
     capSlope <- median(cap/bdat$habVar)
-    escObs <- edat$escapementObs
+    escObs <- edat$escapementFemObs
     esc <- rep(NA,length(escObs))
     for(i in 1:bdat$Npops){
       pInd <- which(edat$stock==i & edat$year %in% (1:3))
@@ -90,13 +73,12 @@ createInitValsFunc <- function(dat, includePlots=FALSE){
     }
 
     pInd <- bdat$stock
-    if(smDat) pMax <- 800 else pMax <- 20
     initList <- list(
-      prod = pmin(prod,pMax),
+      prod = prod,
       cap = cap,
       capSlope = capSlope,
-      yearEffectTmp = rep(0,bdat$Nyears),
-      yearEffectTmpOS = rep(0,bdat$Nyears)
+      yearEffectTmp = rep(0,bdat$Nyears)
+      #spawnersFem = esc
    )
     initList
   }

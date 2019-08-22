@@ -1,0 +1,418 @@
+---
+title: "OCN coho analysis"
+author: "Martin Liermann"
+date: "August 15, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Introduction
+
+Here we present analysis of Oregon Coastal Coho populations. We use two different data sets. 
+
+1)  For 6 basins in Coastal Oregon we have both spawning escapement and smolt out-migration data for coho salmon.
+2)  For 21 basins we have total adult data
+
+# Methods
+
+## The data
+
+For the 6 basins with smolt data we have smolt data and adult data broken down by hatchery/wild and male/female. In our analysis we use smolt out-migrants natural origin observed escapement and pHOS (the proportion of spawners that are hatchery origin). We use harvest rates from the second data set for the 21 basins.
+
+For the 21 basins we have adult escapement broken down by hatchery and wild. We use that to construct natural origin observed escapement and pHOS (the proportion of spawners that are natural origin). For this data set we also have an annual harverst rate which is not population specific.
+
+## The model
+
+The data for each population is fit using a spawner-recruit function, where smolt are modeled as:
+
+$$smolt_y = {spawners_y \over {\left( {1 \over prod^3} + {spawners_y^3 \over cap^3} \right)^{1 \over 3}}} \cdot e^{\epsilon_y}$$
+where, $prod$ is the productivity parameter describing the slope at the origin, $cap$ is the capacity parameter defining asymptote for median recruits, and $\epsilon_y$ describes recruitment variability. 
+
+$$\epsilon_y \sim normal(0,\sigma)$$
+
+This function is a compromise between the hockey stick and Beverton Holt models.
+
+```{r fig.width=5, fig.height=5}
+ss <- seq(0,1000,by=1)
+srFunc <- function(ss,pp,cc) ss/(1/pp^3 + ss^3/cc^3)^(1/3)
+prod <- 2
+cap <- 500
+plot(ss,srFunc(ss,prod,cap),type="l",bty="l", xlab="Spawners", ylab="Recruits",xaxs="i",yaxs="i",xlim=c(0,600),ylim=c(0,600))
+lines(ss,pmin(prod*ss,cap),lty=3)
+lines(ss,ss/(1/prod+ss/cap),lty=2)
+lines(c(0,1000),c(0,1000),col="gray")
+legend("bottomright",lty=1:3, legend=c("This model","Beverton-Holt","hockey stick"))
+
+library(coastalCohoSS)
+
+U <- calcU(2,3)
+Smsy <- cap/prod*(prod^(3/(3+1))-1)
+U2 <- (srFunc(Smsy,prod,cap)-Smsy)/srFunc(Smsy,prod,cap) # this is correct??
+
+```
+
+Population capacity is assumed to be a function of population specific habitat variables ($hab_b$). Here we assume it is proportional to the habitat variable and each population has some lognormal deviation from the median value.
+
+$$cap_{b} \sim capSlope \cdot hab_{b} \cdot e^{\epsilon_h}$$
+
+$$\epsilon_h \sim normal(0,\sigma_h)$$
+
+For this first iteration we assume that all values of $hab_b$ are 1. This means that the parameter $capSlope$ is just the median of the capacity parameters.
+
+The population specific productivity parameters are assumed to come from a lognormal distribution.
+
+$$ln(prod_b) \sim normal(ln(\mu_{prod}),\sigma_{prod})$$
+
+The smolt are then multiplied by an ocean survival, $OS_y$ parameter that is allowed to vary by population and year and the harvest rate, $HR_y$, is applied. For the adult only data (the 21 OCN populations) we do not have smolt data so we set ocean survival to 1.
+
+$$escapement_y = smolt_y OS_y HR_y$$
+
+We then account for hatchery origin fish using the proportion of hatchery origin fish, $pHOS$.
+
+$$spawners_y = escapement_y pHOS_y$$
+
+This in turn feeds back to the next year.
+
+In the observation model we constrain the latent states, $escapement_y$ and $smolt_y$ using the observed data and a log normal observation model. 
+
+$$escapementObs_y \sim logN(escapement_y, \sigma_esc)$$
+
+$$smoltObs_y \sim logN(smolt_y, \sigma_smolt)$$
+
+If both the observation error for the smolts and adults and process error for recruitment residuals and ocean survival are population specific and free parameters, then these parameters will tend to be confounded. Therefore, we need to constrain one or the other. Here we fix observation error. While using incorrect observation error will likely result in biased results, this is likely better than ignorming observation error all together. We use an lognormal sigma of 0.15 which corresponds roughly to a CV of 15%. 
+
+Notice, in theory both observation and process error are estimable since process error affects the next generation while observatoin error does not.
+
+## Priors
+
+```{r}
+# data from Bradford 1995
+#  these are egg to smolt instananeous mortality rates
+#  so survival is exp(-M)
+sDat <- data.frame(
+  population=c("Black","Deer","Flynn","Carnation","Hunt",
+               "Karymaisky","Needle","Minter","Nile","Qualicum"),
+  mean=c(4.17,3.37,4.02,3.88,4.64,5.93,4.45,3.79,4.33,4.40),
+  sd=c(0.93,0.41,0.90,0.47,1.04,0.77,0.89,0.83,0.42,0.79)
+  )
+qM <- quantile(sDat$mean,prob=c(0,0.25,0.5,0.75,1.0))
+```
+
+
+```{r eval=params$runModels, warning=FALSE}
+
+setwd("//nwcfile/home/liermannma/CurrentWorrk/consulting/sept2018_sept2019/oregonCoho/")
+workDir <- "//nwcfile/home/liermannma/CurrentWorrk/consulting/sept2018_sept2019/oregonCoho"
+dataDir <- paste(workDir,"data",sep="/")
+greenT <- rgb(0.2,0.8,0.2,0.2)
+MCMCsims <- 100000
+
+smoltProdMuPrior <- c(mean(log(exp(-sDat$mean)*2500/2)),1/(2^2))
+#smoltProdSDPrior <- c(sd(log(exp(-sDat$mean)*2500/2)),1/(0.4^2))
+adultProdMuPrior <- c(log(4),1/(2^2))
+#adultProdSDPrior <- c(sd(log(sDat$mean)),1/(0.4^2))
+
+# analysis for 21 OCN pops
+library(coastalCohoSS)
+dat <- createJAGSdata(dataDir,"OCN")
+bmod <- createJAGScode(fixedObsError=c(0.15,0.15), smoltData=FALSE)
+initValFunc <- createInitValsFunc(dat)
+priors <- createDefaultPriors()
+priors$prodMuPior <- adultProdMuPrior
+#priors$prodSDPrior <- adultProdSDPrior
+m1 <- runJAGSmodel(bmod, dat, priors, calcInits=initValFunc, MCMCsims=MCMCsims)
+x1 <- getPostDraws(m1)
+Npops1 <- dat$jagsDat$Npops
+siteNames1 <- dat$siteNames
+
+# analysis for 6 OCN pops with smolt data
+library(coastalCohoSS)
+dat <- createJAGSdata(dataDir,"smolt")
+bmod <- createJAGScode(fixedObsError=c(0.15,0.15), smoltData=TRUE)
+initValFunc <- createInitValsFunc(dat)
+priors <- createDefaultPriors()
+priors$prodMuPior <- smoltProdMuPrior
+#priors$prodSDPrior <- smoltProdSDPrior
+m2 <- runJAGSmodel(bmod, dat, priors, calcInits=initValFunc, MCMCsims=MCMCsims)
+x2 <- getPostDraws(m2)
+Npops2 <- dat$jagsDat$Npops
+siteNames2 <- dat$siteNames
+
+# analysis for 6 OCN pops with smolt data (but not using the smolt data)
+library(coastalCohoSS)
+dat <- createJAGSdata(dataDir,"smolt",includeSmolt=FALSE)
+bmod <- createJAGScode(fixedObsError=c(0.15,0.15), smoltData=FALSE)
+initValFunc <- createInitValsFunc(dat)
+priors <- createDefaultPriors()
+priors$prodMuPior <- adultProdMuPrior
+#priors$prodSDPrior <- adultProdSDPrior
+m3 <- runJAGSmodel(bmod, dat, priors, calcInits=initValFunc, MCMCsims=MCMCsims)
+x3 <- getPostDraws(m3)
+Npops3 <- dat$jagsDat$Npops
+siteNames3 <- dat$siteNames
+
+saveRDS(m1,"m1.Rdat")
+saveRDS(m2,"m2.Rdat")
+saveRDS(m3,"m3.Rdat")
+```
+
+```{r eval=!params$runModel}
+m1 <- readRDS("m1.Rdat")
+m2 <- readRDS("m2.Rdat")
+m3 <- readRDS("m3.Rdat")
+```
+
+We place constraints on productivity using data from Bradford 1995. Average egg to smolt survival ranged from `r round(qM[1],1)`% to `r round(qM[5],1)`% for the `r length(sDat$mean)` populations with a mean and standard deviation of `r round(mean(sDat$mean),1)`% and `r round(mean(sDat$mean),1)`%. Assuming an average fecundity of 3,000, the range of expected smolts per spawner is 0.5 $\cdot$ 3000 $\cdot$ (`r round(qM[1],1)`, `r round(qM[5],1)`) = (`r round(0.5*3000*qM[1],1)`,`r round(0.5*3000*qM[3],1)`) with a mean and standard deviation of `r round(mean(0.5*3000*sDat$mean),1)` and `r round(sd(0.5*3000*sDat$mean),1)`
+
+NOTE: This is modeling males and females together.
+
+## Questions
+
+From Rishi's email on 8/14/2019
+
+1)  Inferring from the small scale high intensity projects as to what needs to occur for habitat restoration that may make these population more resilient. Potential for habitat retoration!!
+
+2)  Based on the SR estimates, and SAR ranges seen on these high intensity projects, could we estimate a range of exploitation rates that would be robust to changes/variability in SAR’s.
+
+3)  Using the ranges determined from 2, simulate the overall population trajectory, and make some inferences from that.
+
+Some other ideas:
+
+4)  What do you gain by moving from Sp -> Sp  to Sp -> Sm -> Sp? We can investigate this using the 6 populations. Look at uncertainty in estimates of capacity, productivity and U.
+
+5)  What are the implications of running the analysis as an aggregate vs using individual populations. We can using the 21 OCN pops to look at this. This ties into the idea that not accounting for sub-population structure can cause problems (Thorson's paper w/ rockfish as an example, Ray's salmon HR paper, ...).
+
+## Some thoughts
+
+#### The relationship between capacity and watershed habitat metrics. 
+
+-  With only 6 data points we really can't say much about the hab vs fish relationship. I think we should say something like, here are the variables that did best, but... 
+
+-  We can talk about the potential for improvements assuming different variables. For example, we can't use intrinsic potential since it doesn't depend on habitat restoration (I think, right?). But pool area could be used. 
+
+-  We should also talk about the issues with modeling capacity/equilibrium (local dens dep, marine derived nutrients, meta-population structure with low and high productivity areas, etc...)
+
+#### population structure
+
+-  Should be be treating the basins above the traps as populations? Is there likely a lot of straying between these sub-populations and other locations in the basins. What are the alternatives? limiting to adult to smolt? 
+
+
+## Analyses
+
+Here we run three different analyses
+
+1)  The analysis with all 21 OCN populations but no smolt data.
+2)  The analysis with the 6 sub-populations with smolt data.
+3)  The same as 2, but not using the smolt data (just adult to adult).
+
+# Results
+
+```{r}
+x1 <- getPostDraws(m1)
+x2 <- getPostDraws(m2)
+x3 <- getPostDraws(m3)
+```
+
+## Results for the 6 populations
+
+Including smolt data in the model fitting produces substantially different predicted population dynamics.
+
+```{r warning=FALSE}
+# create a plot of spawner to adult recruits (for 6 pops)
+#  and overlay the two model fits (use two bands)
+
+bdat <- m2$dat$jagsDat
+edat <- expandAllData(bdat)
+popNames <- m2$dat$siteNames
+sims <- length(x2$prod[,2])
+Npops <- bdat$Npops
+
+# calculate the the productivity and capacity values for the spawner to spawner SR functions
+OS <- array(rep(tapply(m3$dat$jagsDat$oceanSurv,m3$dat$jagsDat$stock,median),each=sims),
+            dim=c(sims,Npops))
+prodWS <- x2$prod*invLogit(x2$oceanSurvPopL)
+prodWOS <- x3$prod*OS
+capWS <- x2$cap*invLogit(x2$oceanSurvPopL)
+capWOS <- x3$cap*OS
+
+# calculate different ocean regimes
+
+#####  spawners to trap model (prepare values) #####
+spawnersNO <- edat$escapementObs # natural origin spawners
+spawners <- spawnersNO/(1-edat$pHOS)
+Rtemp <- spawnersNO/(1-edat$HR)
+recruits <- numeric(length(Rtemp))
+for(i in 1:bdat$Npops){
+  recruits[bdat$stock==i] <- c(Rtemp[bdat$stock==i][-(1:3)],rep(NA,3))
+}
+
+##### estimate the SR params #####
+srF <- function(p,ss) ss/(1/p[1]^3 + ss^3/p[2]^3)^(1/3)
+fitBH <- function(ss,rr){
+  ssq <- function(pp,ss,rr){
+    p <- exp(pp)
+    sum((rr-srF(p,ss))^2)
+  }
+  bFit <- nlm(ssq,p=log(c(median(rr/ss),quantile(rr,prob=0.8))),ss,rr)
+  bFit
+}
+
+srDat <- data.frame(S=spawners, R=recruits, stock=edat$stock)
+srDat <- srDat[!is.na(srDat$S) & !is.na(srDat$R),] # remove NAs
+srParams <- array(NA,dim=c(bdat$Npops,2))
+
+par(mfrow=c(2,3))
+
+addBand <- function(prod,cap,ss,col=rgb(0,0,0,0.2)){
+  tmp <- col2rgb(col)
+  lnCol <- rgb(tmp[1]/255,tmp[2]/255,tmp[3]/255,0.9)
+  n <- length(ss)
+  R <- array(NA,dim=c(3,n))
+  for(i in 1:n){
+    R[,i] <- quantile(ss[i]/(1/prod^3+(ss[i]/cap)^3)^(1/3),prob=c(0.1,0.5,0.9))
+  }
+  polygon(x=c(ss,rev(ss)),y=c(R[1,],rev(R[3,])),col=col,border=rgb(0,0,0,0.5))
+  lines(ss,R[2,],col=lnCol)
+}
+
+for(st in 1:bdat$Npops){
+  sInd <- srDat$stock==st
+  ss <- seq(0,max(srDat$S[sInd]),length.out=2001)
+  xLim <- c(0,max(srDat$S[sInd]))
+  yLim <- c(0,max(srDat$R[sInd]))
+  r1 <- fitBH(srDat$S[sInd],srDat$R[sInd])
+  srParams[st,] <- exp(r1$estimate)
+  plot(srDat$S[sInd],srDat$R[sInd],pch=16,col="black",xlab="Spawners",ylab="Recruits",bty="l",main=popNames[st],xlim=xLim,ylim=yLim)
+  lines(xx,srF(exp(r1$estimate),ss=xx),lwd=2,col="black")
+  addBand(prodWOS[,st],capWOS[,st],ss,rgb(0.2,0.2,0.8,0.2))
+  addBand(prodWS[,st],capWS[,st],ss,rgb(1,0.647,0,0.4))
+  
+  grid()
+}
+
+```
+
+We can look at the estimates of productivity (adult to adult) with and without the smolt data. The estimates of adult to adult productivity tend to be higher and less certain when the smolt data is not included.
+
+```{r fig.width=8, fig.height=8}
+prodWS <- x2$prod*invLogit(x2$oceanSurvPopL)
+prodWOS <- x3$prod
+
+pWS <- apply(prodWS,2,quantile,prob=c(0.1,0.5,0.9))
+pWOS <- apply(prodWOS,2,quantile,prob=c(0.1,0.5,0.9))
+
+par(mar=c(4,10,2,2))
+plot(1,1,ylim=c(0.5,6.5),xlim=c(0,max(cbind(pWS,pWOS))),type="n",ylab="", xlab="Productivity",yaxt="n",bty="l")
+axis(side=2,at=1:6,labels=siteNames3,las=2)
+points(y=1:6-0.1,x=pWS[2,])
+points(y=1:6+0.1,x=pWOS[2,],pch=16)
+segments(y0=1:6-0.1,y1=1:6-0.1,x0=pWS[1,],x1=pWS[3,])
+segments(y0=1:6+0.1,y1=1:6+0.1,x0=pWOS[1,],x1=pWOS[3,],lty=3)
+legend(x=10,y=1.5,legend=c("w/o smolt", "w/ smolt"), pch=c(16,1),lty=c(3,1))
+
+```
+
+Including the smolt data results in lower estimated harvest rates at maximum sustainable yield.
+
+```{r}
+# calculating and plotting U, the harvest rate at MSY
+Umsy <- function(pp,ww=3) 1-pp^(-ww/(ww+1))
+
+prodWS <- x2$prod*invLogit(x2$oceanSurvPopL)
+prodWOS <- x3$prod
+
+pWS <- apply(prodWS,2,quantile,prob=c(0.1,0.5,0.9))
+pWOS <- apply(prodWOS,2,quantile,prob=c(0.1,0.5,0.9))
+
+uWS <- array(pmax(Umsy(pWS),0),dim=dim(pWS))
+uWOS <- array(pmax(Umsy(pWOS),0),dim=dim(pWOS))
+
+par(mar=c(4,10,2,2))
+plot(1,1,ylim=c(0.5,6.5),xlim=c(0,1),type="n",ylab="", xlab="MSY harvest rate (U)",yaxt="n",bty="l")
+axis(side=2,at=1:6,labels=siteNames3,las=2)
+points(y=1:6-0.1,x=uWS[2,])
+points(y=1:6+0.1,x=uWOS[2,],pch=16)
+segments(y0=1:6-0.1,y1=1:6-0.1,x0=uWS[1,],x1=uWS[3,])
+segments(y0=1:6+0.1,y1=1:6+0.1,x0=uWOS[1,],x1=uWOS[3,],lty=3)
+legend(x=0,y=1.5,legend=c("w/o smolt", "w/ smolt"), pch=c(16,1),lty=c(3,1))
+```
+
+### Accounting for different ocean regimes
+
+Here's a plot of median log recruitment residuals. Notice that this is short time series so we really can't get a good sense of what good and poor ocean regimes look like.
+
+```{r}
+# Here we calculate the Recruitment residuals, smooth and then choose low and high ocean regimes
+#   use wildSpawners / (1-pHOS) for total spawners
+#   use escapement / (1-HR) for recruits
+#   predicted recruits are based on pWOS, pWS, capWOS and cap WS calculated above.
+st <- m2$dat$jagsDat$stock
+sWS <- x2$spawnersWild * array(rep(1/(1-m2$dat$jagsDat$pHOS),each=sims),dim=dim(x2$spawnersWild))
+sWOS <- x3$spawnersWild * array(rep(1/(1-m3$dat$jagsDat$pHOS),each=sims),dim=dim(x3$spawnersWild))
+rWS <- x2$escapement * array(rep(1/(1-m2$dat$jagsDat$HR),each=sims),dim=dim(x2$escapement))
+rWOS <- x3$escapement * array(rep(1/(1-m3$dat$jagsDat$HR),each=sims),dim=dim(x3$escapement))
+prWS <- sWS/(1/prodWS[,st]^3 + (sWS/capWS[,st])^3)^(1/3)
+prWOS <- sWOS/(1/prodWOS[,st]^3 + (sWOS/capWOS[,st])^3)^(1/3)
+resWS <- log(rWS)-log(prWS)
+resWOS <- log(rWOS)-log(prWOS)
+
+resMedWS <- apply(resWS,2,median)
+#plot(resMedWS,col=st,pch=16)
+
+resMedWOS <- apply(resWOS,2,median)
+#plot(resMedWOS,col=st,pch=16)
+
+#plot(resMedWS,resMedWOS,col=st)
+#lines(c(-3,3),c(-3,3))
+
+allYrs <- 1997:2017
+par(mfrow=c(2,3),mar=c(3,3,4,2),oma=c(4,4,2,2))
+popNames <- m2$dat$siteNames
+yrs <- m2$dat$jagsDat$year
+for(i in 1:m2$dat$jagsDat$Npops){
+  pInd <- which(st==i)
+  yr <- allYrs[yrs[pInd]]
+  plot(yr,resMedWOS[pInd],xlab="",ylab=""
+       ,type="l",xlim=range(allYrs),ylim=c(-1.5,1.5),bty="l",las=2,yaxt="n",main=popNames[i])
+  lines(yr,resMedWS[pInd],xlab="Year",ylab="recruitment residuals (log)",lty=2)
+  lines(range(yr),c(0,0),lty=3)
+  labs <- 2^(-3:3)
+  axis(2,at=log(labs),labels=labs,las=2)
+}
+mtext(1,text="Year",outer=TRUE)
+mtext(2,text="Recruitment / (predicted recruitment)",outer=TRUE)
+
+```
+
+Based on longer time series for OCN coho we could call poor ocean conditions something like a quarter of the current average productivity (based on the mid to late 90s). Adjusting productivity accordingly results in:
+
+
+```{r}
+# calculating and plotting U, the harvest rate at MSY
+Umsy <- function(pp,ww=3) 1-pp^(-ww/(ww+1))
+
+prodWS <- x2$prod*invLogit(x2$oceanSurvPopL) / 4
+prodWOS <- x3$prod / 4
+
+pWS <- apply(prodWS,2,quantile,prob=c(0.1,0.5,0.9))
+pWOS <- apply(prodWOS,2,quantile,prob=c(0.1,0.5,0.9))
+
+uWS <- array(pmax(Umsy(pWS),0),dim=dim(pWS))
+uWOS <- array(pmax(Umsy(pWOS),0),dim=dim(pWOS))
+
+par(mar=c(4,10,2,2))
+plot(1,1,ylim=c(0.5,6.5),xlim=c(0,1),type="n",ylab="", xlab="MSY harvest rate (U)",yaxt="n",bty="l")
+axis(side=2,at=1:6,labels=siteNames3,las=2)
+points(y=1:6-0.1,x=uWS[2,])
+points(y=1:6+0.1,x=uWOS[2,],pch=16)
+segments(y0=1:6-0.1,y1=1:6-0.1,x0=uWS[1,],x1=uWS[3,])
+segments(y0=1:6+0.1,y1=1:6+0.1,x0=uWOS[1,],x1=uWOS[3,],lty=3)
+legend(x=0.6,y=1.5,legend=c("w/o smolt", "w/ smolt"), pch=c(16,1),lty=c(3,1))
+```
+
+Now the estimated harvest rates are much lower. Especially when we use the models fit to the smolt data.
+

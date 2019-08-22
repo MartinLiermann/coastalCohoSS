@@ -3,16 +3,16 @@
 #' @examples
 #' bmod <- createJAGScode()
 #' @export
-createJAGScode <- function(fixedObsError=NULL, smoltData=TRUE){
+createJAGScode5 <- function(fixedObsError=NULL, smoltData=TRUE){
   
   if(is.null(fixedObsError)){
     obsTau <- "
   smoltObsTau ~ dgamma(0.001,0.001)
   escObsTau ~ dgamma(0.001,0.001)"
   } else if(length(fixedObsError)==2) {
-    obsTau <- paste(c("\n  smoltObsTau","  escObsTau"),fixedObsError^(-2),sep=" <- ", collapse="\n")  
+    obsTau <- paste(c("\n  smoltObsTau","  escObsTau"),fixedObsTau^(-2),sep=" <- ", collapse="\n")  
   } else {
-    stop("Error: fixedObsError should be NULL or a vector with two values")
+    stop("Error: fixedObsTau should be NULL or a vector with two values")
   }
 
   if(smoltData){
@@ -34,13 +34,7 @@ createJAGScode <- function(fixedObsError=NULL, smoltData=TRUE){
     smoltObs[i] ~ dlnorm(log(smolt[smoltInd[i]]),smoltObsTau)
   }
 "
-  } else {
-    OCtext1 <- ""
-    OCtext2 <- ""
-    OCtext3 <- ""
-    smoltText <- ""
   }
-  
   # Create a text string with the JAGS model specification
   mod1 <-   paste("
 model
@@ -88,7 +82,7 @@ model
   ### Hyper-priors (i.e. priors describing the distributions of parameters that vary by population)
   # productivity
   logProdMu ~ dnorm(prodMuPrior[1],prodMuPrior[2])
-  logProdSD ~ dt(0,1,1)T(0,) # half cauchy with var=tau=sd=1 # dnorm(prodSDPrior[1],prodSDPrior[2]) 
+  logProdSD ~ dnorm(prodSDPrior[1],prodSDPrior[2]) # dt(0,1,1)T(0,) # half cauchy with var=tau=sd=1
   logProdTau <- 1.0/(logProdSD*logProdSD)
 
   # capacity

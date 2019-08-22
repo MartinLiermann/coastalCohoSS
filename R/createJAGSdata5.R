@@ -1,24 +1,19 @@
 #' create a data list for the JAGS models
 #'
 #' @param dataDir the directory of the file together.csv.
-#' @param includeSmolt if TRUE, smolt data will be included
 #'
 #' @return a list with the data necessary to run the JAGS model.
 #' @examples
 #' dat <- createJAGSprojectionData("data dir goes here")
 #'
 #' @export
-createJAGSdata <- function(dataDir="",dataType="smolt",includeSmolt=TRUE){
+createJAGSdata5 <- function(dataDir="",dataType="smolt"){
   #dataDir <- "Y:/sept2018_sept2019/oregonCoho/data"
 
-  library(dplyr)
-  library(tidyr)
-  
   if(dataType=="OCN"){
     fdat <- read.csv(file=paste(dataDir,"fishDataOCN.csv",sep="/"),stringsAsFactors=FALSE)
     hdat <- read.csv(file=paste(dataDir,"habitatDataOCN.csv",sep="/"),stringsAsFactors=FALSE)
     hrdat <- read.csv(file=paste(dataDir,"harvestRatesOCN.csv",sep="/"),stringsAsFactors=FALSE)
-    osdat <- read.csv(file=paste(dataDir,"oceanSurvivalOCN.csv",sep="/"),stringsAsFactors=FALSE)
     
     sites <- unique(fdat$Site)
     stockNum <- 1:length(sites)
@@ -46,8 +41,6 @@ createJAGSdata <- function(dataDir="",dataType="smolt",includeSmolt=TRUE){
     # the habitat variable
     habVar <- hdat$area[match(sites,hdat$Site)]
     
-    # ocean survival (may just be a bunch of 1's)
-    OSdat <- fdat %>% left_join(osdat,by="broodYear") 
     
     pHOS <- fdat$pHOS
 
@@ -58,7 +51,6 @@ createJAGSdata <- function(dataDir="",dataType="smolt",includeSmolt=TRUE){
       escInd = escInd,
       pHOS = pHOS,
       HR = HRdat$HR,
-      oceanSurv = OSdat$OS,
       habVar = habVar,
       escStartInd = escStartInd,
       escStopInd = escStopInd,
@@ -140,6 +132,10 @@ createJAGSdata <- function(dataDir="",dataType="smolt",includeSmolt=TRUE){
       year = year,
       escapementObs = escapementObs[escInd],
       escInd = escInd,
+      sexRatioObsL = logit(sexRatioObs[sexRatioInd]),
+      sexRatioInd = sexRatioInd,
+      smoltObs = smoltObs[smoltInd],
+      smoltInd = smoltInd,
       pHOS = pHOS,
       HR = fdat$HR,
       habVar = habVar,
@@ -148,15 +144,10 @@ createJAGSdata <- function(dataDir="",dataType="smolt",includeSmolt=TRUE){
       N = length(fdat$Site),
       Npops = length(sites),
       Nyears = yrRange[2]-yrRange[1]+1,
-      Nesc = length(escInd)
+      Nesc = length(escInd),
+      NsexRatio = length(sexRatioInd),
+      Nsmolt = length(smoltInd)
     )
-    if(includeSmolt){
-      jdat$smoltObs <- smoltObs[smoltInd]
-      jdat$smoltInd <- smoltInd
-      jdat$Nsmolt <- length(smoltInd)
-    }else{
-      jdat$oceanSurv <- rep(1,length(pHOS))
-    }
   } else {
     stop("Error: dataType must be smolt or OCN")
   }

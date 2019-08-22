@@ -5,13 +5,14 @@
 #' @examples
 #' priors <- createDefaultPriors()
 #' @export
-createDefaultPriors <- function(modParams=NULL){
+createDefaultPriorsOld <- function(modParams=NULL){
   tmpList <- list(
     # priors
     prodMuPrior = c(mu=100, tau = 0.001),
     prodSDPrior = c(mu=100, tau = 0.001),
     capSlopePrior = c(mu=1, tau = 0.001),
-    oceanSurvMuPrior = c(mu=0, tau = 0.001)
+    oceanSurvMuPrior = c(mu=0, tau = 0.001),
+    sexRatioMuPrior = c(mu=0, tau = 0.001)
   )
   if(!is.null(modParams)){
     for(param in names(modParams)){

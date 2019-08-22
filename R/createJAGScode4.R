@@ -3,44 +3,8 @@
 #' @examples
 #' bmod <- createJAGScode()
 #' @export
-createJAGScode <- function(fixedObsError=NULL, smoltData=TRUE){
-  
-  if(is.null(fixedObsError)){
-    obsTau <- "
-  smoltObsTau ~ dgamma(0.001,0.001)
-  escObsTau ~ dgamma(0.001,0.001)"
-  } else if(length(fixedObsError)==2) {
-    obsTau <- paste(c("\n  smoltObsTau","  escObsTau"),fixedObsError^(-2),sep=" <- ", collapse="\n")  
-  } else {
-    stop("Error: fixedObsError should be NULL or a vector with two values")
-  }
+createJAGScode4 <- function(){
 
-  if(smoltData){
-    OCtext1 <- "
-    logit(oceanSurv[i]) <- oceanSurvL[i] + yearEffectOS[year[i]]
-    oceanSurvL[i] ~ dnorm(oceanSurvPopL[stock[i]], oceanSurvPopTau[stock[i]])"
-    OCtext2 <- "
-    oceanSurvPopL[pop] ~ dnorm(oceanSurvMu, oceanSurvTau)
-    oceanSurvPopTau[pop] ~ dgamma(0.001,0.001)"
-    OCtext3 <-"
-  # ocean survival
-  oceanSurvMu ~ dnorm(oceanSurvMuPrior[1],oceanSurvMuPrior[2])
-  oceanSurvSD ~ dt(0,1,1)T(0,)  # half cauchy with var=tau=sd=1
-  oceanSurvTau <- pow(oceanSurvSD,-2)
-"
-    smoltText <- "
-  # smolt data
-  for(i in 1:Nsmolt){ # smolt trap count (spring)
-    smoltObs[i] ~ dlnorm(log(smolt[smoltInd[i]]),smoltObsTau)
-  }
-"
-  } else {
-    OCtext1 <- ""
-    OCtext2 <- ""
-    OCtext3 <- ""
-    smoltText <- ""
-  }
-  
   # Create a text string with the JAGS model specification
   mod1 <-   paste("
 model
@@ -52,12 +16,16 @@ model
   for(i in 1:N){ # iterate over all years and populations
 
     smolt[i] ~ dlnorm(log(muSmolt[i]), SRresidTau[stock[i]])
-    muSmolt[i] <- spawners[i]/(1/prod[stock[i]]^3 + spawners[i]^3/cap[stock[i]]^3)^(1/3) *
-                 exp(yearEffect[year[i]])
+    muSmolt[i] <- spawners[i]/(1/prod[stock[i]]^3 + spawners[i]^3/cap[stock[i]]^3)^(1/3)# *
+                 #exp(yearEffect[year[i]])
 
-    escapement[i] <- smolt[i] * oceanSurv[i] * (1 - HR[i])
-  ",
-  OCtext1,"
+    escapement[i] <- smolt[i] * oceanSurv[i] * (1-HR[year[i]])
+
+    logit(oceanSurv[i]) <- ifelse(type==1,
+       oceanSurvL[i] + yearEffectOS[year[i]],
+       oceanSurvPopL[stock[i]] + yearEffectOS[year[i]])
+
+    oceanSurvL[i] ~ dnorm(oceanSurvPopL[stock[i]], oceanSurvPopTau[stock[i]])
   }
 
   # offset escapement to produce spawners
@@ -75,28 +43,34 @@ model
   }
 
   ### population specific priors ###
-  for(pop in 1:Npops){
+  for(pop in 1:Npops1){
     prod[pop] ~ dlnorm(logProdMu, logProdTau)
     cap[pop] ~ dlnorm(log(capSlope*habVar[pop]),logCapTau)
 
+    oceanSurvPopL[pop] ~ dnorm(oceanSurvMu, oceanSurvTau)
+
     SRresidTau[pop] ~ dgamma(0.001,0.001)
     SRresidSD[pop] <- 1.0/sqrt(SRresidTau[pop])
-  ",
-  OCtext2,"
+
+    oceanSurvPopTau[pop] ~ dgamma(0.001,0.001)
   }
 
   ### Hyper-priors (i.e. priors describing the distributions of parameters that vary by population)
   # productivity
   logProdMu ~ dnorm(prodMuPrior[1],prodMuPrior[2])
-  logProdSD ~ dt(0,1,1)T(0,) # half cauchy with var=tau=sd=1 # dnorm(prodSDPrior[1],prodSDPrior[2]) 
+  logProdSD ~ dnorm(prodSDPrior[1],prodSDPrior[2]) # dt(0,1,1)T(0,) # half cauchy with var=tau=sd=1
   logProdTau <- 1.0/(logProdSD*logProdSD)
 
   # capacity
   capSlope ~ dlnorm(capSlopePrior[1],capSlopePrior[2])
   logCapSD ~ dt(0,1,1)T(0,)  # half cauchy with var=tau=sd=1 # dunif(0,10) #
   logCapTau <- 1.0/(logCapSD*logCapSD)
-  ",
-  OCtext3,"
+
+  # ocean survival
+  oceanSurvMu ~ dnorm(oceanSurvMuPrior[1],oceanSurvMuPrior[2])
+  oceanSurvSD ~ dt(0,1,1)T(0,)  # half cauchy with var=tau=sd=1
+  oceanSurvTau <- pow(oceanSurvSD,-2)
+
   ### year effects (SR resids), smolt residuals and ocean survival common to all populations
   for(k in 1:Nyears){
     yearEffectTmp[k] ~ dnorm(0,yearEffectTau)
@@ -107,17 +81,21 @@ model
   yearEffectTau ~ dgamma(0.001,0.001)
   yearEffectTauOS ~ dgamma(0.001,0.001)
 
-
   #######################################
   ########### OBSERVATION MODEL #########
   #######################################
-",
-  smoltText,"
+
+  # smolt data
+  for(i in 1:Nsmolt){ # smolt trap count (spring)
+    smoltObs[i] ~ dlnorm(log(smolt[smoltInd[i]]),smoltObsTau)
+  }
+  smoltObsTau ~ dgamma(0.001,0.001)
+
   # escapement data
   for(i in 1:Nesc){
     escapementObs[i] ~ dlnorm(log(spawnersWild[escInd[i]]),escObsTau)
   }
-",obsTau,"
+  escObsTau ~ dgamma(0.001,0.001)
 
  }
 ",sep="")

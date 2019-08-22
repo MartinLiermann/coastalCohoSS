@@ -1,0 +1,195 @@
+---
+  title: "OCN coho analysis"
+author: "Martin Liermann"
+date: "August 15, 2019"
+output: html_document
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Introduction
+
+Here we present analysis of Oregon Coastal Coho populations. We use two different data sets. 
+
+1)  For 6 basins in Coastal Oregon we have both spawning escapement and smolt out-migration data for coho salmon.
+2)  For 21 basins we have total adult data
+
+# Methods
+
+## The data
+
+For the 6 basins with smolt data we have smolt data and adult data broken down by hatchery/wild and male/female. In our analysis we use smolt out-migrants natural origin observed escapement and pHOS (the proportion of spawners that are hatchery origin). We use harvest rates from the second data set for the 21 basins.
+
+For the 21 basins we have adult escapement broken down by hatchery and wild. We use that to construct natural origin observed escapement and pHOS (the proportion of spawners that are natural origin). For this data set we also have an annual harverst rate which is not population specific.
+
+## The model
+The data for each population is fit using a spawner-recruit function, where smolt are modeled as:
+  
+  $$smolt_y = {spawners_y \over {\left( {1 \over prod^3} + {spawners_y^3 \over cap^3} \right)^{1 \over 3}}} \cdot e^{\epsilon_y}$$
+  where, $prod$ is the productivity parameter describing the slope at the origin, $cap$ is the capacity parameter defining asymptote for median recruits, and $\epsilon_y$ describes recruitment variability. 
+
+$$\epsilon_y \sim normal(0,\sigma)$$
+  
+  This function is a compromise between the hockey stick and Beverton Holt models.
+
+```{r fig.width=5,fig.height=5}
+ss <- seq(0,1000,by=1)
+srFunc <- function(ss,pp,cc) ss/(1/pp^3 + ss^3/cc^3)^(1/3)
+prod <- 2
+cap <- 500
+plot(ss,srFunc(ss,prod,cap),type="l",bty="l", xlab="Spawners", ylab="Recruits",xaxs="i",yaxs="i",xlim=c(0,600),ylim=c(0,600))
+lines(ss,pmin(prod*ss,cap),lty=3)
+lines(ss,ss/(1/prod+ss/cap),lty=2)
+lines(c(0,1000),c(0,1000),col="gray")
+legend("bottomright",lty=1:3, legend=c("This model","Beverton-Holt","hockey stick"))
+
+library(coastalCohoSS)
+
+U <- calcU(2,3)
+Smsy <- cap/prod*(prod^(3/(3+1))-1)
+U2 <- (srFunc(Smsy,prod,cap)-Smsy)/srFunc(Smsy,prod,cap) # this is correct??
+
+```
+
+Population capacity is assumed to be a function of population specific habitat variables ($hab_b$). Here we assume it is proportional to the habitat variable and each population has some lognormal deviation from the median value.
+
+$$cap_{b} \sim capSlope \cdot hab_{b} \cdot e^{\epsilon_h}$$
+  
+  $$\epsilon_h \sim normal(0,\sigma_h)$$
+  
+  For this first iteration we assume that all values of $hab_b$ are 1. This means that the parameter $capSlope$ is just the median of the capacity parameters.
+
+The population specific productivity parameters are assumed to come from a lognormal distribution.
+
+$$ln(prod_b) \sim normal(ln(\mu_{prod}),\sigma_{prod})$$
+  
+  The smolt are then multiplied by an ocean survival, $OS_y$ parameter that is allowed to vary by population and year and the harvest rate, $HR_y$, is applied. For the adult only data (the 21 OCN populations) we do not have smolt data so we set ocean survival to 1.
+
+$$escapement_y = smolt_y OS_y HR_y$$
+  
+  We then account for hatchery origin fish using the proportion of hatchery origin fish, $pHOS$.
+
+$$spawners_y = escapement_y pHOS_y$
+  
+  This in turn feeds back to the next year.
+
+In the observation model we constrain the latent states, $escapement_y$ and $smolt_y$ using the observed data and a log normal observation model. 
+
+$$escapementObs_y \sim logN(escapement_y, \sigma_esc)$$
+  
+  $$smoltObs_y \sim logN(smolt_y, \sigma_smolt)$$
+  
+  If both the observation error for the smolts and adults and process error for recruitment residuals and ocean survival are population specific and free parameters, then these parameters will tend to be confounded. Therefore, we need to constrain one of the other. We explore a few different approaches.
+
+1) fix the process error to an approximate cv (lognormal $\sigma$) of 0.15 for all populations and years.
+
+2) Use population and year specific 
+
+Notice, in theory both observation and process error are estimable since process error affects the next generation while observatoin error does not.
+
+## Priors
+
+```{r}
+# data from Bradford 1995
+sDat <- data.frame(
+  population=c("Black","Deer","Flynn","Carnation","Hunt",
+               "Karymaisky","Needle","Minter","Nile","Qualicum"),
+  mean=c(4.17,3.37,4.02,3.88,4.64,5.93,4.45,3.79,4.33,4.40),
+  sd=c(0.93,0.41,0.90,0.47,1.04,0.77,0.89,0.83,0.42,0.79)
+)
+qM <- quantile(sDat$mean,prob=c(0,0.25,0.5,0.75,1.0))
+```
+
+
+```{r eval=params$runModels}
+
+setwd("//nwcfile/home/liermannma/CurrentWorrk/consulting/sept2018_sept2019/oregonCoho/")
+greenT <- rgb(0.2,0.8,0.2,0.2)
+
+# analysis for 21 OCN pops
+library(coastalCohoSS)
+dat <- createJAGSdata("data","OCN")
+bmod <- createJAGScode(fixedObsError=c(0.15,0.15), smoltData=FALSE)
+initValFunc <- createInitValsFunc(dat)
+priors <- createDefaultPriors()
+priors$prodMuPior <- c(mean(log(sDat$mean)),1/(0.2^2))
+priors$prodSDPrior <- c(sd(log(sDat$mean)),1/(0.2^2))
+m1 <- runJAGSmodel(bmod, dat, priors, calcInits=initValFunc, MCMCsims=100000)
+x1 <- getPostDraws(m1)
+Npops1 <- dat$jagsDat$Npops
+siteNames1 <- dat$siteNames
+
+# analysis for 6 OCN pops with smolt data
+library(coastalCohoSS)
+dat <- createJAGSdata("data","smolt")
+bmod <- createJAGScode(fixedObsError=c(0.15,0.15), smoltData=TRUE)
+initValFunc <- createInitValsFunc(dat)
+priors <- createDefaultPriors()
+priors$prodMuPior <- c(mean(log(sDat$mean)),1/(0.2^2))
+priors$prodSDPrior <- c(sd(log(sDat$mean)),1/(0.2^2))
+m2 <- runJAGSmodel(bmod, dat, priors, calcInits=initValFunc, MCMCsims=100000)
+x2 <- getPostDraws(m1)
+Npops2 <- dat$jagsDat$Npops
+siteNames2 <- dat$siteNames
+
+# analysis for 6 OCN pops with smolt data (but not using the smolt data)
+library(coastalCohoSS)
+dat <- createJAGSdata("data","smolt",includeSmolt=FALSE)
+bmod <- createJAGScode(fixedObsError=c(0.15,0.15), smoltData=FALSE)
+initValFunc <- createInitValsFunc(dat)
+priors <- createDefaultPriors()
+priors$prodMuPior <- c(mean(log(sDat$mean)),1/(0.2^2))
+priors$prodSDPrior <- c(sd(log(sDat$mean)),1/(0.2^2))
+m3 <- runJAGSmodel(bmod, dat, priors, calcInits=initValFunc, MCMCsims=100000)
+x3 <- getPostDraws(m1)
+Npops3 <- dat$jagsDat$Npops
+siteNames3 <- dat$siteNames
+
+saveRDS(m1,"m1.Rdat")
+saveRDS(m2,"m2.Rdat")
+saveRDS(m3,"m3.Rdat")
+
+```
+
+We place constraints on productivity using data from Bradford 1995. Average egg to smolt survival ranged from `r round(qM[1],1)`% to `r round(qM[5],1)`% for the `r length(sDat$mean)` populations with a mean and standard deviation of `r round(mean(sDat$mean),1)`% and `r round(mean(sDat$mean),1)`%. Assuming an average fecundity of 3,000 and accounting for the fact that the SR function in the model is applied to females only, the range of expected smolts per spawner is 2 $\cdot$ 3000 $\cdot$ (`r round(qM[1],1)`, `r round(qM[5],1)`) = (`r round(2*3000*qM[1],1)`,`r round(2*3000*qM[3],1)`) with a mean and standard deviation of `r round(mean(6000*sDat$mean),1)` and `r round(sd(6000*sDat$mean),1)`
+
+NOTE: need to fix this if we are not going to use females only.
+
+## Questions
+
+From Rishi's email on 8/14/2019
+
+1)  Inferring from the small scale high intensity projects as to what needs to occur for habitat restoration that may make these population more resilient. Potential for habitat retoration!!
+
+2)  Based on the SR estimates, and SAR ranges seen on these high intensity projects, could we estimate a range of exploitation rates that would be robust to changes/variability in SAR’s.
+
+3)  Using the ranges determined from 2, simulate the overall population trajectory, and make some inferences from that.
+
+Some other ideas:
+
+4)  What do you gain by moving from Sp -> Sp  to Sp -> Sm -> Sp? We can investigate this using the 6 populations. Look at uncertainty in estimates of capacity, productivity and U.
+
+5)  What are the implications of running the analysis as an aggregate vs using individual populations. We can using the 21 OCN pops to look at this. This ties into the idea that not accounting for sub-population structure can cause problems (Thorson's paper w/ rockfish as an example, Ray's salmon HR paper, ...).
+
+## Some thoughts
+
+#### The relationship between capacity and watershed habitat metrics. 
+
+With only 6 data points we really can't do anything with the 
+
+
+## Analyses
+
+Here we run three different analyses
+
+1)  The analysis with all 21 OCN populations but no smolt data.
+2)  The analysis with the 6 sub-populations with smolt data.
+3)  The same as 2, but not using the smolt data (just adult to adult).
+
+
+# Results
+
+

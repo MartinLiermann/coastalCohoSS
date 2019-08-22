@@ -215,42 +215,18 @@ plotAge <- function(runObj,p=0.80,newWindow=FALSE){
 #' @param param either a character string with the name of the parameter or an array with the parameter posterior.
 #' @param paramName optional parameter giving the full name of the model parameter.
 #' @param plotScale optional parameters describing on what scale to plot the y-axis ("identity","log","logit").
+#' @return a scalar or vector of U's.
+#' @export
+plotParam <-function(
+  #go get old version. accidently overwrote
+)
+  
+#' Calculate,U, the harvest rate and maximum sustainable yield.
+#'
+#' @param a scalar or vector of productivities.
+#' @param the w parameter in the modified Beverton Holt.
 #' @return a plot of a model parameter by year and population.
 #' @export
-plotParam <- function(runObj,param,paramName=param,p=0.80,plotScale="identity",yRangeType="byPop",newWindow=FALSE){
-  qP <- (1-p)/2
-  bdat <- runObj$dat$jagsDat
-  odat <- runObj$dat$otherDat
-  popNames <- odat$popNames
-  if(is.character(param)){
-    x <- getPostDraws(runObj)
-    yVals <- x[[param]]
-  }else{
-    yVals <- param
-  }
-  if(newWindow) windows(8,8)
-  if(plotScale=="identity"){
-    yVals <- yVals
-  }else if(plotScale=="log"){
-    yVals <- log(yVals)
-  }else if(plotScale=="logit"){
-    yVals <- logit(yVals)
-  }else{
-    stop("ERROR: unrecognized plotScale parameter.")
-  }
-  par(mfrow=c(bdat$Npops,1),oma=c(3,3,1,1),mar=c(2,2,3,1))
-  qVal <- apply(yVals,2,quantile,prob=c(qP,0.5,1-qP))
-  if(yRangeType=="common") yRange <- range(qVal,na.rm=TRUE)
-  yrs <- odat$year
-  yrRange <- range(odat$year)
-  for(i in 1:bdat$Npops){
-    pInd <- bdat$stock==i
-    if(yRangeType=="byPop") yRange <- range(qVal[,pInd],na.rm=TRUE)
-    plot(yrs[pInd],qVal[2,pInd],bty="l",xlab="", ylab="",pch=16,main=popNames[i],xlim=yrRange,ylim=yRange,type="l",lwd=2)
-    lines(yrs[pInd],qVal[1,pInd],lty=3)
-    lines(yrs[pInd],qVal[3,pInd],lty=3)
-    grid()
-  }
-  mtext(side=2,text=paramName,outer=TRUE,line=1)
-  mtext(side=1,text="Year",outer=TRUE,line=1)
+calcU <- function(p,w){
+  1-1/p*((p^(w/(w+1))-1)*((p^(w/(w+1))-1)^(-w)+1))^(1/w)
 }
