@@ -155,15 +155,15 @@ x3 <- getPostDraws(m3)
 Npops3 <- dat$jagsDat$Npops
 siteNames3 <- dat$siteNames
 
-saveRDS(m1,"m1.Rdat")
-saveRDS(m2,"m2.Rdat")
-saveRDS(m3,"m3.Rdat")
+saveRDS(m1,"m1b.Rdat")
+saveRDS(m2,"m2b.Rdat")
+saveRDS(m3,"m3b.Rdat")
 ```
 
 ```{r eval=!params$runModel}
-m1 <- readRDS("m1.Rdat")
-m2 <- readRDS("m2.Rdat")
-m3 <- readRDS("m3.Rdat")
+m1 <- readRDS("m1b.Rdat")
+m2 <- readRDS("m2b.Rdat")
+m3 <- readRDS("m3b.Rdat")
 ```
 
 We place constraints on productivity using data from Bradford 1995. Average egg to smolt survival ranged from `r round(qM[1],1)`% to `r round(qM[5],1)`% for the `r length(sDat$mean)` populations with a mean and standard deviation of `r round(mean(sDat$mean),1)`% and `r round(mean(sDat$mean),1)`%. Assuming an average fecundity of 3,000, the range of expected smolts per spawner is 0.5 $\cdot$ 3000 $\cdot$ (`r round(qM[1],1)`, `r round(qM[5],1)`) = (`r round(0.5*3000*qM[1],1)`,`r round(0.5*3000*qM[3],1)`) with a mean and standard deviation of `r round(mean(0.5*3000*sDat$mean),1)` and `r round(sd(0.5*3000*sDat$mean),1)`
