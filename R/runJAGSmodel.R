@@ -4,8 +4,9 @@ runJAGSmodel <- function(bMod, dat, priors, calcInits, MCMCsims=10000, projectio
 
   require(R2jags)
 
-  saveList <- c("prod","cap","capSlope","yearEffect","yearEffectTau",
-                "smolt","escapement","spawnersWild","SRresidSD")
+  saveList <- c("prod","cap","logProdMu","logProdSD","capSlope","logCapSD",
+                "SRresidSD","yearEffect","yearEffectTau",
+                "smolt","escapement","spawnersWild")
 
   if("smoltObs" %in% names(dat$jagsDat)) saveList <- c(saveList,"oceanSurv","oceanSurvPopL","yearEffectOS","yearEffectTauOS")
     

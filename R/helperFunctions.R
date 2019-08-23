@@ -228,5 +228,5 @@ plotParam <-function(
 #' @return a plot of a model parameter by year and population.
 #' @export
 calcU <- function(p,w){
-  1-1/p*((p^(w/(w+1))-1)*((p^(w/(w+1))-1)^(-w)+1))^(1/w)
+  1-p^(-w/(w+1))
 }
