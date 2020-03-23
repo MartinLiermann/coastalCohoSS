@@ -8,8 +8,10 @@ runJAGSmodel <- function(bMod, dat, priors, calcInits, MCMCsims=10000, projectio
                 "SRresidSD","yearEffect","yearEffectTau",
                 "smolt","escapement","spawnersWild")
 
-  if("smoltObs" %in% names(dat$jagsDat)) saveList <- c(saveList,"oceanSurv","oceanSurvPopL","yearEffectOS","yearEffectTauOS")
-    
+  if("smoltObs" %in% names(dat$jagsDat)){
+    saveList <- c(saveList,"oceanSurv","oceanSurvPopL","oceanSurvMu","oceanSurvSD",
+                  "yearEffectOS","yearEffectTauOS")
+  } 
   # write the model to the local directory
   writeLines(bMod,con="bMod.txt") # writeLine seems to work best (cat, and write gave truncated results)
 

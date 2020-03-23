@@ -64,7 +64,6 @@ fillGapsKern <- function(dat,param,fKern=c(rep(0.01,1000),1:3,0,3:1,rep(0.01,100
   tmp
 }
 
-
 #' Expands data to include all years and observations.
 #'
 #' @param data the data you would like to fill.
@@ -217,9 +216,9 @@ plotAge <- function(runObj,p=0.80,newWindow=FALSE){
 #' @param plotScale optional parameters describing on what scale to plot the y-axis ("identity","log","logit").
 #' @return a scalar or vector of U's.
 #' @export
-plotParam <-function(
+plotParam <- function(){
   #go get old version. accidently overwrote
-)
+}
   
 #' Calculate,U, the harvest rate and maximum sustainable yield.
 #'

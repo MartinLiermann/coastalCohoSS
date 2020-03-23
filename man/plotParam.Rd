@@ -14,15 +14,9 @@ plotParam()
 \item{paramName}{optional parameter giving the full name of the model parameter.}
 
 \item{plotScale}{optional parameters describing on what scale to plot the y-axis ("identity","log","logit").}
-
-\item{a}{scalar or vector of productivities.}
-
-\item{the}{w parameter in the modified Beverton Holt.}
 }
 \value{
 a scalar or vector of U's.
-
-a plot of a model parameter by year and population.
 }
 \description{
 Plot a parameter by year and population.

@@ -1,8 +1,16 @@
 ---
-title: "OCN coho analysis"
-author: "Martin Liermann"
-date: "August 15, 2019"
-output: html_document
+title: "Oregon Coastal Coho - Spawner to Smolt"
+author: "Rishi Sharma and Martin Liermann"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    theme: sandstone
+    highlight: tango 
+    toc: true
+    toc_float: true
+    code_folding: hide
+params:
+  runMod: FALSE
 ---
 
 ```{r setup, include=FALSE}
@@ -36,6 +44,9 @@ $$\epsilon_y \sim normal(0,\sigma)$$
 This function is a compromise between the hockey stick and Beverton Holt models.
 
 ```{r fig.width=5, fig.height=5}
+
+library(coastalCohoSS)
+
 ss <- seq(0,1000,by=1)
 srFunc <- function(ss,pp,cc) ss/(1/pp^3 + ss^3/cc^3)^(1/3)
 prod <- 2
@@ -45,8 +56,6 @@ lines(ss,pmin(prod*ss,cap),lty=3)
 lines(ss,ss/(1/prod+ss/cap),lty=2)
 lines(c(0,1000),c(0,1000),col="gray")
 legend("bottomright",lty=1:3, legend=c("This model","Beverton-Holt","hockey stick"))
-
-library(coastalCohoSS)
 
 U <- calcU(2,3)
 Smsy <- cap/prod*(prod^(3/(3+1))-1)
@@ -102,7 +111,6 @@ qM <- quantile(sDat$mean,prob=c(0,0.25,0.5,0.75,1.0))
 ```
 
 ```{r eval=params$runModels, warning=FALSE}
-
 setwd("//nwcfile/home/liermannma/CurrentWorrk/consulting/sept2018_sept2019/oregonCoho/")
 workDir <- "//nwcfile/home/liermannma/CurrentWorrk/consulting/sept2018_sept2019/oregonCoho"
 dataDir <- paste(workDir,"data",sep="/")
@@ -113,19 +121,6 @@ smoltProdMuPrior <- c(mean(log(exp(-sDat$mean)*2500/2)),1/(2^2))
 #smoltProdSDPrior <- c(sd(log(exp(-sDat$mean)*2500/2)),1/(0.4^2))
 adultProdMuPrior <- c(log(4),1/(2^2))
 #adultProdSDPrior <- c(sd(log(sDat$mean)),1/(0.4^2))
-
-# analysis for 21 OCN pops
-library(coastalCohoSS)
-dat <- createJAGSdata(dataDir,"OCN")
-bmod <- createJAGScode(fixedObsError=c(0.15,0.15), smoltData=FALSE)
-initValFunc <- createInitValsFunc(dat)
-priors <- createDefaultPriors()
-priors$prodMuPior <- adultProdMuPrior
-#priors$prodSDPrior <- adultProdSDPrior
-m1 <- runJAGSmodel(bmod, dat, priors, calcInits=initValFunc, MCMCsims=MCMCsims)
-x1 <- getPostDraws(m1)
-Npops1 <- dat$jagsDat$Npops
-siteNames1 <- dat$siteNames
 
 # analysis for 6 OCN pops with smolt data
 library(coastalCohoSS)
@@ -153,9 +148,23 @@ x3 <- getPostDraws(m3)
 Npops3 <- dat$jagsDat$Npops
 siteNames3 <- dat$siteNames
 
-saveRDS(m1,"m1b.Rdat")
-saveRDS(m2,"m2b.Rdat")
-saveRDS(m3,"m3b.Rdat")
+# analysis for 21 OCN pops
+library(coastalCohoSS)
+dat <- createJAGSdata(dataDir,"OCN")
+bmod <- createJAGScode(fixedObsError=c(0.15,0.15), smoltData=FALSE)
+initValFunc <- createInitValsFunc(dat)
+priors <- createDefaultPriors()
+priors$prodMuPior <- adultProdMuPrior
+#priors$prodSDPrior <- adultProdSDPrior
+m1 <- runJAGSmodel(bmod, dat, priors, calcInits=initValFunc, MCMCsims=MCMCsims)
+x1 <- getPostDraws(m1)
+Npops1 <- dat$jagsDat$Npops
+siteNames1 <- dat$siteNames
+
+saveRDS(m1,"m1c.Rdat")
+saveRDS(m2,"m2c.Rdat")
+saveRDS(m3,"m3c.Rdat")
+
 ```
 
 ```{r eval=!params$runModel}
@@ -256,7 +265,7 @@ srF <- function(p,ss) ss/(1/p[1]^3 + ss^3/p[2]^3)^(1/3)
 fitBH <- function(ss,rr){
   ssq <- function(pp,ss,rr){
     p <- exp(pp)
-    sum((rr-srF(p,ss))^2)
+    sum((log(rr)-log(srF(p,ss)))^2)
   }
   bFit <- nlm(ssq,p=log(c(median(rr/ss),quantile(rr,prob=0.8))),ss,rr)
   bFit
@@ -288,7 +297,7 @@ for(st in 1:bdat$Npops){
   r1 <- fitBH(srDat$S[sInd],srDat$R[sInd])
   srParams[st,] <- exp(r1$estimate)
   plot(srDat$S[sInd],srDat$R[sInd],pch=16,col="black",xlab="Spawners",ylab="Recruits",bty="l",main=popNames[st],xlim=xLim,ylim=yLim)
-  lines(xx,srF(exp(r1$estimate),ss=xx),lwd=2,col="black")
+  lines(ss,srF(exp(r1$estimate),ss=ss),lwd=2,col="black")
   addBand(prodWOS[,st],capWOS[,st],ss,rgb(0.2,0.2,0.8,0.2))
   addBand(prodWS[,st],capWS[,st],ss,rgb(1,0.647,0,0.4))
   
@@ -313,6 +322,7 @@ points(y=1:6-0.1,x=pWS[2,])
 points(y=1:6+0.1,x=pWOS[2,],pch=16)
 segments(y0=1:6-0.1,y1=1:6-0.1,x0=pWS[1,],x1=pWS[3,])
 segments(y0=1:6+0.1,y1=1:6+0.1,x0=pWOS[1,],x1=pWOS[3,],lty=3)
+grid()
 legend(x=10,y=1.5,legend=c("w/o smolt", "w/ smolt"), pch=c(16,1),lty=c(3,1))
 
 ```
@@ -415,6 +425,70 @@ legend(x=0.6,y=1.5,legend=c("w/o smolt", "w/ smolt"), pch=c(16,1),lty=c(3,1))
 ```
 
 Now the estimated harvest rates are much lower. Especially when we use the models fit to the smolt data.
+
+Now let's use the ODFW definitions of very low (<2), low (2-4.5), medium (4.5-8), and high )>8) marine survival. The median marine survivals for the populations are `r paste(siteNames3, "=", round(apply(100*invLogit(x2$oceanSurvPopL),2,median),1), "%", sep="",collapse=", "). If instead of these observed/estimated marine survival we use the value above we get
+
+```{r}
+# calculating and plotting U, the harvest rate at MSY
+Umsy <- function(pp,ww=3) 1-pp^(-ww/(ww+1))
+
+prodWS <- x2$prod * 0.01
+prodWOS <- x3$prod/invLogit(x2$oceanSurvPopL) * 0.01
+
+pWS <- apply(prodWS,2,quantile,prob=c(0.1,0.5,0.9))
+pWOS <- apply(prodWOS,2,quantile,prob=c(0.1,0.5,0.9))
+
+uWS <- array(pmax(Umsy(pWS),0),dim=dim(pWS))
+uWOS <- array(pmax(Umsy(pWOS),0),dim=dim(pWOS))
+
+par(mar=c(4,10,2,2))
+plot(1,1,ylim=c(0.5,6.5),xlim=c(0,1),type="n",ylab="", xlab="MSY harvest rate (U)",yaxt="n",bty="l")
+axis(side=2,at=1:6,labels=siteNames3,las=2)
+points(y=1:6-0.1,x=uWS[2,])
+points(y=1:6+0.1,x=uWOS[2,],pch=16)
+segments(y0=1:6-0.1,y1=1:6-0.1,x0=uWS[1,],x1=uWS[3,])
+segments(y0=1:6+0.1,y1=1:6+0.1,x0=uWOS[1,],x1=uWOS[3,],lty=3)
+legend(x=0.6,y=1.5,legend=c("w/o smolt", "w/ smolt"), pch=c(16,1),lty=c(3,1))
+```
+
+Here's ocean survival vs U.
+
+```{r}
+# calculating and plotting U, the harvest rate at MSY
+Umsy <- function(pp,ww=3) 1-pp^(-ww/(ww+1))
+sims <- length(x2$logProdMu)
+plot(1,1,xlim=c(0,0.1),ylim=c(0,1),xlab="Ocean survival",ylab="U",xaxs="i",yaxs="i",type="n",bty="l")
+osVals <- (1:200)/2000
+n <- length(osVals)
+uVals <- array(NA,dim=c(3,n))
+for(i in 1:n){
+  os <- osVals[i]
+  prodWS <- x2$prod * os
+  prodWOS <- x3$prod/invLogit(x2$oceanSurvPopL) * os
+  prodMu <- exp(rnorm(sims,x2$logProdMu,x2$logProdSD)) * os
+  # change this to use median from oceanSurvMu when I rerun and monitor that parameter
+  prodMuA <- exp(rnorm(sims,x3$logProdMu,x3$logProdSD))/median(invLogit(x2$oceanSurvPopL)) * os
+  pWS <- apply(prodWS,2,quantile,prob=c(0.1,0.5,0.9))
+  pWOS <- apply(prodWOS,2,quantile,prob=c(0.1,0.5,0.9))
+  pMu <- quantile(prodMu,prob=c(0.1,0.5,0.9))
+  pMuA <- quantile(prodMuA,prob=c(0.1,0.5,0.9))
+  
+  uWS <- array(pmax(Umsy(pWS),0),dim=dim(pWS))
+  uWOS <- array(pmax(Umsy(pWOS),0),dim=dim(pWOS))
+  uMu <- pmax(Umsy(pMu),0)
+  uMuA <- pmax(Umsy(pMuA),0)
+  uVals[,i] <- uMu 
+}
+lines(osVals,uVals[1,],lty=2)
+lines(osVals,uVals[3,],lty=2)
+lines(osVals,uVals[2,],lty=1,lwd=2)
+osCuts <- c(0.02,0.045,0.08)
+segments(x0=osCuts,x1=osCuts,y0=rep(0,3),y1=rep(1,3), lty=1, lwd=3, col=rgb(0,0,0,0.25))
+text(x=c(0.01,0.03,0.06,0.09),y=rep(0.95,4),labels=c("Very low","Low","Medium","High"))
+for(i in 1:10) lines(c(0,1),rep(i/10,2),lty=3) 
+
+
+```
 
 ## The year effect
 
