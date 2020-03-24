@@ -15,6 +15,10 @@ params:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+workDir <- "//nwcfile/home/liermannma/CurrentWorrk/consulting/sept2018_sept2019/oregonCoho"
+workDir <- "C://Users/Martin.Liermann/Documents/spring2020/oregonCoho"
+runsDir <- paste(workDir,"runs",sep="/")
+dataDir <- paste(workDir,"data",sep="/")
 ```
 
 # Introduction
@@ -44,7 +48,6 @@ $$\epsilon_y \sim normal(0,\sigma)$$
 This function is a compromise between the hockey stick and Beverton Holt models.
 
 ```{r fig.width=5, fig.height=5}
-
 library(coastalCohoSS)
 
 ss <- seq(0,1000,by=1)
@@ -107,13 +110,12 @@ sDat <- data.frame(
   mean=c(4.17,3.37,4.02,3.88,4.64,5.93,4.45,3.79,4.33,4.40),
   sd=c(0.93,0.41,0.90,0.47,1.04,0.77,0.89,0.83,0.42,0.79)
   )
+sDat$surv <- exp(-sDat$mean)
 qM <- quantile(sDat$mean,prob=c(0,0.25,0.5,0.75,1.0))
+qS <- quantile(sDat$surv,prob=c(0,0.25,0.5,0.75,1.0))
 ```
 
-```{r eval=params$runModels, warning=FALSE}
-setwd("//nwcfile/home/liermannma/CurrentWorrk/consulting/sept2018_sept2019/oregonCoho/")
-workDir <- "//nwcfile/home/liermannma/CurrentWorrk/consulting/sept2018_sept2019/oregonCoho"
-dataDir <- paste(workDir,"data",sep="/")
+```{r eval=params$runMod, warning=FALSE}
 greenT <- rgb(0.2,0.8,0.2,0.2)
 MCMCsims <- 100000
 
@@ -161,19 +163,18 @@ x1 <- getPostDraws(m1)
 Npops1 <- dat$jagsDat$Npops
 siteNames1 <- dat$siteNames
 
-saveRDS(m1,"m1c.Rdat")
-saveRDS(m2,"m2c.Rdat")
-saveRDS(m3,"m3c.Rdat")
-
+saveRDS(m1,paste(runsDir,"m1.Rdat",sep="/"))
+saveRDS(m2,paste(runsDir,"m2.Rdat",sep="/"))
+saveRDS(m3,paste(runsDir,"m3.Rdat",sep="/"))
 ```
 
-```{r eval=!params$runModel}
-m1 <- readRDS("m1b.Rdat")
-m2 <- readRDS("m2b.Rdat")
-m3 <- readRDS("m3b.Rdat")
+```{r eval=!params$runMod}
+m1 <- readRDS(paste(runsDir,"m1.Rdat",sep="/"))
+m2 <- readRDS(paste(runsDir,"m2.Rdat",sep="/"))
+m3 <- readRDS(paste(runsDir,"m3.Rdat",sep="/"))
 ```
 
-We place constraints on productivity using data from Bradford 1995. Average egg to smolt survival ranged from `r round(qM[1],1)`% to `r round(qM[5],1)`% for the `r length(sDat$mean)` populations with a mean and standard deviation of `r round(mean(sDat$mean),1)`% and `r round(mean(sDat$mean),1)`%. Assuming an average fecundity of 3,000, the range of expected smolts per spawner is 0.5 $\cdot$ 3000 $\cdot$ (`r round(qM[1],1)`, `r round(qM[5],1)`) = (`r round(0.5*3000*qM[1],1)`,`r round(0.5*3000*qM[3],1)`) with a mean and standard deviation of `r round(mean(0.5*3000*sDat$mean),1)` and `r round(sd(0.5*3000*sDat$mean),1)`
+We place constraints on productivity using data from Bradford 1995. Average egg to smolt survival ranged from `r round(qS[1],1)`% to `r round(qS[5],1)`% for the `r length(sDat$mean)` populations with a mean and standard deviation of `r round(mean(sDat$surv),1)`% and `r round(sd(sDat$surv),1)`%. Assuming an average fecundity of 2,500, the range of expected smolts per spawner is 0.5 $\cdot$ 2500 $\cdot$ (`r round(qS[1],1)`, `r round(qS[5],1)`) = (`r round(0.5*2500*qS[1],1)`,`r round(0.5*2500*qS[3],1)`) with a mean and standard deviation of `r round(mean(0.5*2500*sDat$surv),1)` and `r round(sd(0.5*3000*sDat$surv),1)`
 
 NOTE: This is modeling males and females together.
 
@@ -183,9 +184,15 @@ From Rishi's email on 8/14/2019
 
 1)  Inferring from the small scale high intensity projects as to what needs to occur for habitat restoration that may make these population more resilient. Potential for habitat retoration!!
 
+Q: We have basin area, avg gradient and a few other things for the whole basin, and then we also have habitat survey results (for presumably a subset of the habitat. i.e. specific reaches). What do you have in mind here? Come up with some plausible % improvement based on other studies (like the Solazi study with two basins).  
+
 2)  Based on the SR estimates, and SAR ranges seen on these high intensity projects, could we estimate a range of exploitation rates that would be robust to changes/variability in SAR’s.
 
+Q: Is what I did below with U[msy] what you had in mind? 
+
 3)  Using the ranges determined from 2, simulate the overall population trajectory, and make some inferences from that.
+
+Q: What inference did you have in mind. Would we simulate ocean survival (measure that with error) and then apply the current policy? If the harvest decision is based on estimated ocean survival, how do they estimate ocean survival? Sorry, I know we talked about this but it's a little rusty for me:)
 
 Some other ideas:
 
@@ -199,13 +206,13 @@ Some other ideas:
 
 -  With only 6 data points we really can't say much about the hab vs fish relationship. I think we should say something like, here are the variables that did best, but... 
 
--  We can talk about the potential for improvements assuming different variables. For example, we can't use intrinsic potential since it doesn't depend on habitat restoration (I think, right?). But pool area could be used. 
+-  We can talk about the potential for improvements assuming different variables. For example, we can't use intrinsic potential since it doesn't depend on habitat restoration (I think, right?). But pool area could be used. Seems like we need some sense of potential and current state, and I'm not sure we have the expertise to get that from these
 
 -  We should also talk about the issues with modeling capacity/equilibrium (local dens dep, marine derived nutrients, meta-population structure with low and high productivity areas, etc...)
 
 #### population structure
 
--  Should be be treating the basins above the traps as populations? Is there likely a lot of straying between these sub-populations and other locations in the basins. What are the alternatives? limiting to adult to smolt? 
+-  Should be treating the basins above the traps as populations? Is there likely a lot of straying between these sub-populations and other locations in the basins. What are the alternatives? limiting to adult to smolt? 
 
 #### how to constrain productivity for the adult to adult models
 
@@ -225,6 +232,14 @@ Here we run three different analyses
 x1 <- getPostDraws(m1)
 x2 <- getPostDraws(m2)
 x3 <- getPostDraws(m3)
+
+Npops1 <- m1$dat$jagsDat$Npops
+Npops2 <- m2$dat$jagsDat$Npops
+Npops3 <- m3$dat$jagsDat$Npops
+
+siteNames1 <- m1$dat$siteNames
+siteNames2 <- m2$dat$siteNames
+siteNames3 <- m3$dat$siteNames
 ```
 
 ## Results for the 6 populations
@@ -308,7 +323,7 @@ for(st in 1:bdat$Npops){
 
 We can look at the estimates of productivity (adult to adult) with and without the smolt data. The estimates of adult to adult productivity tend to be higher and less certain when the smolt data is not included.
 
-```{r fig.width=8, fig.height=8}
+```{r fig.width=7, fig.height=7}
 prodWS <- x2$prod*invLogit(x2$oceanSurvPopL)
 prodWOS <- x3$prod
 
@@ -426,7 +441,7 @@ legend(x=0.6,y=1.5,legend=c("w/o smolt", "w/ smolt"), pch=c(16,1),lty=c(3,1))
 
 Now the estimated harvest rates are much lower. Especially when we use the models fit to the smolt data.
 
-Now let's use the ODFW definitions of very low (<2), low (2-4.5), medium (4.5-8), and high )>8) marine survival. The median marine survivals for the populations are `r paste(siteNames3, "=", round(apply(100*invLogit(x2$oceanSurvPopL),2,median),1), "%", sep="",collapse=", "). If instead of these observed/estimated marine survival we use the value above we get
+Now let's use the ODFW definitions of very low (<2), low (2-4.5), medium (4.5-8), and high )>8) marine survival. The median marine survivals for the populations are `r paste(siteNames3, "=", round(apply(100*invLogit(x2$oceanSurvPopL),2,median),1), "%", sep="",collapse=", ")`. If instead of these observed/estimated marine survival we use the value above we get
 
 ```{r}
 # calculating and plotting U, the harvest rate at MSY
@@ -568,7 +583,7 @@ lines(yrs,yeQ[2,],lty=3)
 lines(yrs,yeQ[4,],lty=3)
 pSamp <- sample(1:length(x$prod[,1]),25)
 for(smp in pSamp){
-  lines(yrs,x$yearEffect[smp,],col=lineCol)
+  lines(yrs,x$yearEffectOS[smp,],col=lineCol)
 }
 grid()
 legend("bottomright",lty=c(1,3),legend=c("Median","50% credible interval"))
@@ -683,4 +698,22 @@ for(st in 1:bdat$Npops){
 }
 
 ```
+
+# Talking points
+
+-  when you have smolt data you are able to get better estimates of productivity
+
+-  How does it improve capacity estimates?
+
+-  This also improves your estimate of U.
+
+-  We should use simulated data to make this points at first. Otherwise, we are not sure if having smolt data does in fact improve our estimates.
+
+-  We can look at the current harvest management rules and see how they perform in simulations versus other approaches. 
+
+-  We can also decompose temporal variability into fresh water and ocean look at how much of the respective sources are shared between populations.
+
+-  When we have smolt data and are able to decompose survival into freshwater and ocean, we are better able to look at the effects of habitat restoration (since it is focused on freshwater). 
+
+-  We need to remember that we are just looking at one life-history strategry. I imagine there are fry migrants past the trap. Depending on how many there are and where they go, this could be a relatively large component of the productivity. Ignoring this could be a problem.
 
