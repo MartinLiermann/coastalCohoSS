@@ -8,7 +8,7 @@
 #' dat <- createJAGSprojectionData("data dir goes here")
 #'
 #' @export
-createJAGSdata <- function(dataDir="",dataType="smolt",includeSmolt=TRUE){
+createJAGSdata <- function(dataDir="",dataType="smolt",includeSmolt=TRUE,habType="area"){
   #dataDir <- "Y:/sept2018_sept2019/oregonCoho/data"
 
   library(dplyr)
@@ -44,7 +44,7 @@ createJAGSdata <- function(dataDir="",dataType="smolt",includeSmolt=TRUE){
     HRdat <- fdat %>% left_join(hrdat,by="broodYear") 
     
     # the habitat variable
-    habVar <- hdat$area[match(sites,hdat$Site)]
+    habVar <- hdat[match(sites,hdat$Site),habType]
     
     # ocean survival (may just be a bunch of 1's)
     OSdat <- fdat %>% left_join(osdat,by="broodYear") 
@@ -123,7 +123,7 @@ createJAGSdata <- function(dataDir="",dataType="smolt",includeSmolt=TRUE){
     year <- fdat$BroodYear-yrRange[1]+1
   
     # the habitat variable
-    habVar <- hdat$area[match(sites,hdat$Site)]
+    habVar <- hdat[match(sites,hdat$Site),habType]
   
     # create escStartInd and escStopInd for summing age specific escapement
     # starts at year minYear+5 and ends at year maxYear+3 (since we only need age 4&5)

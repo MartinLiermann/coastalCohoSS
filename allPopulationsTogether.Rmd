@@ -1,0 +1,668 @@
+---
+title: "All pops"
+author: "GR modeling team"
+date: "June 11, 2020"
+output: html_document
+---
+
+```{r}
+workDir <- "//nwcfile/home/liermannma/CurrentWorrk/consulting/sept2018_sept2019/oregonCoho"
+dataDir <- paste(workDir,"data",sep="/")
+library(coastalCohoSS)
+```
+
+# Todo
+
+-  Probably change to a log-normal model. The logit normal formulation that I used in the orignal version may be leading to non-identifiability problems. Also, JAGs is set up to do things in terms of conjugate priors. And, if I use the log-normal formulation for survival I get $S_f S_o = exp(lS_f + lS_o)$. The down side is that you can get values > 1 for survival. But, given the survivals are small, this may not be an issue.
+
+$$Sm = \frac {Sp} {\frac {1}{1500*surv_{\mu}} + \frac {Sp}{cap}}exp(z1_i + z2_i)$$
+
+Here's a logit normal formulation.:
+
+$$Sm = \frac {Sp} {\frac {1}{1500*surv_{\mu}} + \frac {Sp}{cap}} frac {invLogit(z1_i} {surv_{\mu}} invLogit(z2_i)$$
+
+In both cases we parameterize as the spawner recruit function as the median. In the first example you can have more than 1500 smolt (although in many cases it would be unlikely). In the second case 1500 is the maximum you can achieve.
+
+Another option is a complementary log-log parameterization.
+
+$$Sm = \frac {Sp} {\frac {1}{1500*surv_{\mu}} + \frac {Sp}{\frac{cap}{1500*surv_{\mu}}}} frac {invLogit(z1_i} {surv_{\mu}} exp(-exp(z2_i))$$
+
+# Introduction
+
+Here I will attempt to fit all of the data at once. So, the 6 basins with smolt data and the 21 populations with just spawner data. I
+
+## The model
+
+Here's version 1. I didn't get this sample. because I apply time varying survival first and then non-time-varying density dependence, this may create non-identifiability issues (and it' doesn't make a lot of sense. See above for a more sensible parameterization).
+
+```{r}
+modText <- "
+model
+{
+  ###################################
+  ########### PROCESS MODEL #########
+  ###################################
+  
+  for(i in 1:N){ # iterate over all years and populations
+    
+    eggs[i] <- spawners[i]*3000/2
+    smolt[i] <- eggs[i]/(1/fwSurv[stock[i]] + eggs[i]^3/cap[stock[i]]^3)^(1/3)
+    escapement[i] <- smolt[i] * oSurv[i] * (1 - HR[i])
+
+    logit(fwSurv[i]) <- fwSurvL[i]
+    fwSurvL[i] ~ dnorm(fwSurvPopL[stock[i]], fwSurvPopTau[stock[i]])
+    
+    logit(oSurv[i]) <- oSurvL[i] + yearEffectOS[year[i]]
+    oSurvL[i] ~ dnorm(oSurvPopL[stock[i]], oSurvPopTau[stock[i]])
+    
+  }
+  
+  # offset escapement to produce spawners
+  # spawners are in calendar years and escapement are in brood years
+  for(pop in 1:Npops){
+    for(i in (escStartInd[pop]+3):escStopInd[pop]){
+      spawnersWild[i] <- escapement[i-3]
+      spawners[i] <- spawnersWild[i] / (1-pHOS[i])
+    }
+    # fill in the missing years with a vague prior
+    for(i in escStartInd[pop]:(escStartInd[pop]+2)){
+      spawnersWild[i]  ~ dlnorm(0,0.0001)
+      spawners[i] <- spawnersWild[i] / (1-pHOS[i])
+    }
+  }
+  
+  ### population specific priors ###
+  for(pop in 1:Npops){
+    cap[pop] ~ dlnorm(log(capSlope*habVar[pop]),logCapTau)
+    
+    SRresidTau[pop] ~ dgamma(0.001,0.001)
+    SRresidSD[pop] <- 1.0/sqrt(SRresidTau[pop])
+
+    fwSurvPopL[pop] ~ dnorm(fwSurvMu, fwSurvTau)
+    fwSurvPopTau[pop] ~ dgamma(0.001,0.001)
+    
+    oSurvPopL[pop] ~ dnorm(oSurvMu, oSurvTau)
+    oSurvPopTau[pop] ~ dgamma(0.001,0.001)
+  }
+  
+  ### Hyper-priors (i.e. priors describing the distributions of parameters that vary by population)
+
+  # capacity
+  capSlope ~ dlnorm(capSlopePrior[1],capSlopePrior[2])
+  logCapSD ~ dt(0,1,1)T(0,)  # half cauchy with var=tau=sd=1 # dunif(0,10) #
+  logCapTau <- 1.0/(logCapSD*logCapSD)
+
+  # freshwater survival
+  fwSurvMu ~ dnorm(fwSurvMuPrior[1],fwSurvMuPrior[2])
+  fwSurvSD ~ dt(0,1,1)T(0,)  # half cauchy with var=tau=sd=1
+  fwSurvTau <- pow(fwSurvSD,-2)
+  
+  # ocean survival
+  oSurvMu ~ dnorm(oSurvMuPrior[1],oSurvMuPrior[2])
+  oSurvSD ~ dt(0,1,1)T(0,)  # half cauchy with var=tau=sd=1
+  oSurvTau <- pow(oSurvSD,-2)
+  
+  ### year effect for ocean survival common to all populations
+  for(k in 1:Nyears){
+    yearEffectTmpOS[k] ~ dnorm(0,yearEffectTauOS)
+    yearEffectOS[k] <- yearEffectTmpOS[k]-mean(yearEffectTmpOS)
+  }
+  yearEffectTauOS ~ dgamma(0.001,0.001)
+  
+  #######################################
+  ########### OBSERVATION MODEL #########
+  #######################################
+  
+  # smolt data
+  for(i in 1:Nsmolt){ # smolt trap count (spring)
+    smoltObs[i] ~ dlnorm(log(smolt[smoltInd[i]]),smoltObsTau)
+  }
+  
+  # escapement data
+  for(i in 1:Nesc){
+    escapementObs[i] ~ dlnorm(log(spawnersWild[escInd[i]]),escObsTau)
+  }
+  
+  smoltObsTau <- 44.4444444444444
+  escObsTau <- 44.4444444444444
+  
+}
+"
+cat(modText,file="bmod.txt")
+```
+
+Here's a simple log normal based version.
+
+```{r}
+modText <- "
+model
+{
+  ###################################
+  ########### PROCESS MODEL #########
+  ###################################
+  
+  for(i in 1:N){ # iterate over all years and populations
+    
+    smolt[i] ~ dlnorm(log(muSmolt[i]), fwTau[stock[i]])
+    logSmolt[i] <- log(spawners[i]) - 
+                   log(1/prod[stock[i]]^3 + (spawners[i]/cap[stock[i]])^3)/3
+
+    escapement[i] <- smolt[i] * oSurv[i] * (1 - HR[i])
+
+    logit(oSurv[i]) <- oSurvL[i]
+    oSurvL[i] ~ dnorm(commonOsurvL[year[i]]+oSurvPopL[stock[i]],
+                      oSurvPopTau[stock[i]])
+ 
+  }
+  
+  # offset escapement to produce spawners
+  # spawners are in calendar years and escapement are in brood years
+  for(pop in 1:Npops){
+    for(i in (escStartInd[pop]+3):escStopInd[pop]){
+      spawnersWild[i] <- escapement[i-3]
+      spawners[i] <- spawnersWild[i] / (1-pHOS[i])
+    }
+    # fill in the missing years with a vague prior
+    for(i in escStartInd[pop]:(escStartInd[pop]+2)){
+      spawnersWild[i]  ~ dlnorm(0,0.0001)
+      spawners[i] <- spawnersWild[i] / (1-pHOS[i])
+    }
+  }
+  
+  ### population specific priors ###
+  for(pop in 1:Npops){
+    prod[pop] ~ dlnorm(logProdMu,1/(prodSD*prodSD))
+    cap[pop] ~ dlnorm(log(capSlope*habVar[pop]),1/(capSD*capSD))
+    
+    fwTau[pop] ~ dgamma(0.001,0.001)
+
+    oSurvPopL[pop] ~ dnorm(oSurvMu, oSurvTau)
+    oSurvPopTau[pop] ~ dgamma(0.001,0.001)
+  }
+  
+  ### Hyper-priors (i.e. priors describing the distributions of parameters that vary by population)
+
+  # capacity
+  capSlope ~ dlnorm(capSlopePrior[1],capSlopePrior[2])
+  logCapSD ~ dt(0,1,1)T(0,)  # half cauchy with var=tau=sd=1 # dunif(0,10) #
+  logCapTau <- 1.0/(logCapSD*logCapSD)
+
+  # freshwater survival
+  fwSurvMu ~ dnorm(fwSurvMuPrior[1],fwSurvMuPrior[2])
+  fwSurvSD ~ dt(0,1,1)T(0,)  # half cauchy with var=tau=sd=1
+  fwSurvTau <- pow(fwSurvSD,-2)
+  
+  # ocean survival
+  oSurvMu ~ dnorm(oSurvMuPrior[1],oSurvMuPrior[2])
+  oSurvSD ~ dt(0,1,1)T(0,)  # half cauchy with var=tau=sd=1
+  oSurvTau <- pow(oSurvSD,-2)
+  
+  ### year effect for ocean survival common to all populations
+  for(k in 1:Nyears){
+    yearEffectTmpOS[k] ~ dnorm(0,yearEffectTauOS)
+    yearEffectOS[k] <- yearEffectTmpOS[k]-mean(yearEffectTmpOS)
+  }
+  yearEffectTauOS ~ dgamma(0.001,0.001)
+  
+  #######################################
+  ########### OBSERVATION MODEL #########
+  #######################################
+  
+  # smolt data
+  for(i in 1:Nsmolt){ # smolt trap count (spring)
+    smoltObs[i] ~ dlnorm(log(smolt[smoltInd[i]]),smoltObsTau)
+  }
+  
+  # escapement data
+  for(i in 1:Nesc){
+    escapementObs[i] ~ dlnorm(log(spawnersWild[escInd[i]]),escObsTau)
+  }
+  
+  smoltObsTau <- 44.4444444444444
+  escObsTau <- 44.4444444444444
+  
+}
+"
+cat(modText,file="bmod.txt")
+```
+
+
+Now get all of the data together. 
+
+```{r}
+datLCMall <- createJAGSdata(dataDir,"smolt",habType="miles")
+datOCNall <- createJAGSdata(dataDir,"OCN",habType="miles")
+datLCM <- datLCMall$jagsDat
+datOCN <- datOCNall$jagsDat
+
+firstYrLCM <- min(createJAGSdata(dataDir,"smolt")$fdat$BroodYear)
+firstYrOCN <- min(createJAGSdata(dataDir,"OCN")$fdat$broodYear)
+yrDiff <- (firstYrLCM-firstYrOCN)
+
+# stack the LCM data ontop of the OCN data
+dat <- list()
+
+# data for all years and populations (process model N total)
+dat$N <- datLCM$N + datOCN$N
+dat$stock <- c(datLCM$stock, datOCN$stock+datLCM$Npops)
+dat$LCM <- rep(c(1,0), c(datLCM$N,datOCN$N))
+dat$pHOS <- c(datLCM$pHOS,datOCN$pHOS)
+dat$HR <- c(datLCM$HR,datOCN$HR)
+dat$year <- c(datLCM$year + yrDiff,datOCN$year)
+dat$escStartInd <- c(datLCM$escStartInd, datOCN$escStartInd + datLCM$N)
+dat$escStopInd <- c(datLCM$escStopInd, datOCN$escStopInd + datLCM$N)
+dat$Nyears <- diff(range(dat$year))+1
+
+# populations
+dat$Npops <- datLCM$Npops + datOCN$Npops
+dat$habVar <- c(datLCM$habVar,datOCN$habVar)
+
+# observed escapement
+dat$escapementObs <- c(datLCM$escapementObs,datOCN$escapementObs)
+dat$escInd <- c(datLCM$escInd,datOCN$escInd+datLCM$Nesc)
+dat$Nesc <- datLCM$Nesc + datOCN$Nesc
+
+# observed smolt (only for LCM pops)
+dat$smoltObs <- datLCM$smoltObs
+dat$smoltInd <- datLCM$smoltInd
+dat$Nsmolt <- datLCM$Nsmolt
+
+popNames <- c(datLCMall$siteNames,datOCNall$siteNames)
+year <- c(datLCMall$fdat$BroodYear,datOCNall$fdat$broodYear)
+years <- min(year):max(year)
+```
+
+Look at the data
+
+For the 6 LCM populations
+
+```{r}
+library(ggplot2)
+
+yrInd <- which((years %% 5)==0)
+yrLabs <- years[yrInd]
+
+tDat <- data.frame(
+  Escapement = rep(NA,dat$N),
+  Smolt = rep(NA,dat$N),
+  Population = dat$stock,
+  Year = dat$year,
+  pHOS = dat$pHOS,
+  HR = dat$HR,
+  LCM = dat$LCM,
+  oSurv = rep(NA,dat$N),
+  A2A = rep(NA,dat$N)
+)
+tDat$Escapement[dat$escInd] <- dat$escapementObs
+tDat$Smolt[dat$smoltInd] <- dat$smoltObs
+
+for(p in 1:dat$Npops){
+  e1 <- dat$escStartInd[p]
+  e2 <- dat$escStopInd[p]
+  eRng <- (e1+3):e2
+  if(dat$LCM[p]==1){
+    tDat$oSurv[eRng] <- tDat$Escapement[eRng]/(1-tDat$HR[eRng])/tDat$Smolt[eRng-3]
+  }
+  tDat$A2A[eRng] <- (tDat$Escapement[eRng]/(1-tDat$HR[eRng]))/
+                    (tDat$Escapement[eRng-3]/(1-tDat$pHOS[eRng-3]))
+}
+
+tmpNams <- popNames
+names(tmpNams)=1:dat$Npops
+pop.names <- as_labeller(tmpNams)
+
+# ggplot(tDat,aes(x=Year,y=Escapement)) +
+#   geom_line() +
+#   facet_grid(Population~.,scales="free_y")
+# 
+# ggplot(tDat[tDat$LCM==1,],aes(x=Year,y=Smolt)) +
+#   geom_line() +
+#   facet_grid(Population~.,scales="free_y")
+# 
+# ggplot(tDat[tDat$LCM==1,],aes(x=Year,y=Smolt/Escapement)) +
+#   geom_line() +
+#   facet_grid(Population~.,scales="free_y")
+# 
+# ggplot(tDat[tDat$LCM==1,],aes(x=Year,y=oSurv)) +
+#   geom_line() +
+#   facet_grid(Population~.,scales="free_y",labeller=pop.names)
+
+tmp <- tDat %>% group_by(Population) %>%
+  mutate(escStnd=as.numeric(scale(log(Escapement))),
+         smoltStnd=as.numeric(scale(log(Smolt))),
+         A2AStnd=as.numeric(scale(log(A2A))),
+         oSurvStnd=as.numeric(scale(log(oSurv))))%>%
+  ungroup()
+```
+
+Here's a plot of log standardized escapement (orange is negative and blue positive)
+
+```{r fig.width=8,fig.height=12}
+pCol = c("orange","slateblue")
+ggplot(tmp,aes(x=Year,y=Population)) +
+  geom_point(aes(size=abs(tmp$escStnd)),color=pCol[sign(tmp$escStnd)/2+1.5]) +
+  scale_size_continuous(range = c(0,4)) +
+  scale_x_continuous(breaks=yrInd, labels=yrLabs) +
+  scale_y_continuous(breaks = 1:dat$Npops,labels=popNames) +
+  theme(axis.text.x = element_text(color="black", size=7, angle=45)) +
+  theme_bw()
+```
+
+Same thing for (adult[y+3]/(1-HR[y+3])) / (adult[y]/(1-pHOS[y]))
+
+```{r fig.width=8,fig.height=12}
+ggplot(tmp,aes(x=Year,y=Population)) +
+  geom_point(aes(size=abs(tmp$A2AStnd)),color=pCol[sign(tmp$A2AStnd)/2+1.5]) +
+  scale_size_continuous(range = c(0,4)) +
+  scale_x_continuous(breaks=yrInd, labels=yrLabs) +
+  scale_y_continuous(breaks = 1:dat$Npops,labels=popNames) +
+  theme(axis.text.x = element_text(color="black", size=7, angle=45)) +
+  theme_bw()
+```
+
+Same thing for smolt to adult survival.
+(adult[y+3]/(1-HR[y+3])) / smolt[y]
+
+```{r fig.width=8,fig.height=6}
+lcmDat <- tmp[tmp$LCM==1,]
+ggplot(lcmDat,aes(x=Year,y=Population)) +
+  geom_point(aes(size=abs(lcmDat$oSurvStnd)),color=pCol[sign(lcmDat$oSurvStnd)/2+1.5]) +
+  scale_size_continuous(range = c(0,4)) +
+  scale_x_continuous(breaks=yrInd, labels=yrLabs) +
+  scale_y_continuous(breaks = 1:dat$Npops,labels=popNames) +
+  theme(axis.text.x = element_text(color="black", size=7, angle=45)) +
+  theme_bw()
+```
+
+Now let's use some back of the envelopt calculations to estimate some parameters.
+
+```{r}
+  hockeyStick <- function(S,a,b){
+    pmin(log(a)+log(S),log(b))
+  }
+
+  bevHolt <- function(S,a,b){
+    log(S/(1/a+S/b))
+  }
+
+  SS_HockeyStick <- function(p,S,R){
+    sum((log(R)-hockeyStick(S,exp(p[1]),exp(p[2])))^2)
+  }
+
+  SS_bevHolt <- function(p,S,R){
+    sum((log(R)-bevHolt(S,exp(p[1]),exp(p[2])))^2)
+  }
+
+  fitHockeyStick <- function(S,R){
+    keepVals <- is.finite(S) & is.finite(R)
+    S <- S[keepVals]
+    R <- R[keepVals]
+    p <- c(max(log((R+0.001)/(S+0.001))),mean(log(R)))
+    tmp <- optim(p,SS_HockeyStick, method = "SANN",control = list(temp=5000,tmax=5000),S=S,R=R)
+    tmp <- nlm(SS_HockeyStick,tmp$par ,S=S,R=R)
+    tmp$par <- tmp$estimate
+    tmp
+  }
+
+  fitBevHolt <- function(S,R){
+    keepVals <- is.finite(S) & is.finite(R)
+    S <- S[keepVals]
+    R <- R[keepVals]
+    p <- c(max(log((R+0.001)/(S+0.001))),mean(log(R)))
+    tmp <- optim(p,SS_bevHolt, method = "SANN",control = list(temp=5000,tmax=5000),S=S,R=R)
+    tmp <- nlm(SS_bevHolt,tmp$par ,S=S,R=R)
+    tmp$par <- tmp$estimate
+    tmp
+  }
+
+  addBevHolt <- function(S,R){
+    tmp <- fitBevHolt(S,R)
+    xx <- seq(from=0,max(S,na.rm=T),length.out=100)
+    lines(xx,exp(bevHolt(xx,exp(tmp$par[1]),exp(tmp$par[2]))),lwd=2,col=rgb(0.1,0.1,0.9,0.5))
+  }
+
+  addHockeyStick <- function(S,R){
+    tmp <- fitHockeyStick(S,R)
+    xx <- seq(from=0,max(S,na.rm=T),length.out=100)
+    lines(xx,exp(hockeyStick(xx,exp(tmp$par[1]),exp(tmp$par[2]))),lwd=2,col=rgb(0.1,0.1,0.9,0.5))# rgb(0.9,0.6,0.1,0.5))
+  }
+
+
+```
+
+```{r}
+tDat <- datLCM
+N <- tDat$N
+Npops <- tDat$Npops
+esc <- rep(NA,N)
+esc[tDat$escInd] <- tDat$escapementObs
+smlt <- rep(NA,N)
+smlt[tDat$smoltInd] <- tDat$smoltObs
+
+fwSurv <- rep(NA,N)
+oSurv <- rep(NA,N)
+ss <- rep(NA,N)
+ee <- rep(NA,N)
+rr <- rep(NA,N)
+cap <- rep(NA,Npops)
+pSurv <- rep(NA,Npops)
+
+for(p in 1:tDat$Npops){
+  ss <- (esc[y+3]/(1-tDat$HR[y+3]))
+  y1 <- tDat$escStartInd[p]
+  y2 <- tDat$escStopInd[p]-3
+  yRng <- y1:y2
+  ss[yRng] <- esc[yRng]/(1-tDat$pHOS[yRng])
+  ee[yRng] <- ss[yRng]*1500
+  rr[yRng] <- (esc[yRng+3]/(1-tDat$HR[yRng+3]))
+  oSurv[yRng] <- rr[yRng]/smlt[yRng]
+  fwSurv[yRng] <- smlt[yRng]/ee[yRng]
+  f1 <- fitHockeyStick(ee[yRng],rr[yRng])
+  f2 <- fitHockeyStick(ee[yRng],smlt[yRng])
+  pSurv[p] <- exp(f2$estimate[1])
+  cap[p] <- exp(f2$estimate[2])
+}
+
+estList <- list(oSurv=oSurv,fwSurv=fwSurv, stock=tDat$stock)
+
+```
+
+## Simulate data
+
+```{r}
+
+dat$N <- datLCM$N + datOCN$N
+dat$stock <- c(datLCM$stock, datOCN$stock+datLCM$Npops)
+dat$LCM <- rep(c(1,0), c(datLCM$N,datOCN$N))
+dat$pHOS <- c(datLCM$pHOS,datOCN$pHOS)
+dat$HR <- c(datLCM$HR,datOCN$HR)
+dat$year <- c(datLCM$year + yrDiff,datOCN$year)
+dat$escStartInd <- c(datLCM$escStartInd, datOCN$escStartInd + datLCM$N)
+dat$escStopInd <- c(datLCM$escStopInd, datOCN$escStopInd + datLCM$N)
+dat$Nyears <- diff(range(dat$year))+1
+
+# populations
+dat$Npops <- datLCM$Npops + datOCN$Npops
+dat$habVar <- c(datLCM$habVar,datOCN$habVar)
+
+# the function will simulate forward in time for all populations
+# You can specify:
+#  - initial values (3 years for each pop)
+#  - year or just population specific values for fw and o survival
+#  - HR and pHOS
+#  - stock specific capacity
+#  - common year trend
+
+createSimParams <- function(jDat){
+  # create spawners
+  esc <- rep(NA,jDat$N)
+  esc[jDat$escInd] <- jDat$escapementObs
+  S <- esc/(1-jDat$pHOS)
+  spawners <- rep(NA,jDat$N)
+  for(p in 1:jDat$Npops){
+    for(i in jDat$escStartInd[p]:(jDat$escStartInd[p]+2)){
+       spawners[i] <- ifelse(is.na(S[i]), mean(S[i:(i+5)],na.rm=TRUE),S[i])
+    }
+  }
+  # use calculate Init values to set fw and o survival
+  iVals <- createInitValFunc(jDat)()
+  
+}
+simulateDat <- function(stock,escStartInd,escStopInd,N,Npops,Nyears,
+                        oSurvL,fwSurvL,oSurvPopL,fwSurvPopL,escapement){
+  
+}
+Npops <- 10
+escStart <- array(rpois(Npops*3,rlnorm(Npops*3,log(1000),0.2)),dim=c(Npops,3))
+
+  for(pop in 1:Npops){
+    # start the population with 3 years
+    for(i in escStartInd[pop]:(escStartInd[pop]+2)){
+      spawnersWild[i]  ~ escStart
+      spawners[i] <- spawnersWild[i] / (1-pHOS[i])
+    }
+
+    for(i in (escStartInd[pop]+3):escStopInd[pop]){
+      spawnersWild[i] <- escapement[i-3]
+      spawners[i] <- spawnersWild[i] / (1-pHOS[i])
+    }
+  }
+
+  for(i in 1:N){ # iterate over all years and populations
+    
+    eggs[i] <- spawners[i]*3000/2
+    smolt[i] <- eggs[i]/(1/fwSurv[stock[i]] + eggs[i]^3/cap[stock[i]]^3)^(1/3)
+    escapement[i] <- smolt[i] * oSurv[i] * (1 - HR[i])
+
+    logit(fwSurv[i]) <- fwSurvL[i]
+    fwSurvL[i] ~ dnorm(fwSurvPopL[stock[i]], fwSurvPopTau[stock[i]])
+    
+    logit(oSurv[i]) <- oSurvL[i] + yearEffectOS[year[i]]
+    oSurvL[i] ~ dnorm(oSurvPopL[stock[i]], oSurvPopTau[stock[i]])
+    
+  }
+  
+  # offset escapement to produce spawners
+  # spawners are in calendar years and escapement are in brood years
+
+```
+
+## Initital values
+
+```{r}
+createInitValFunc <- function(estList){
+  # year and population specific logit survival values
+  oSurvL <- logit(estList$oSurv)
+  fwSurvL <- logit(estList$fwSurv)
+  # calculate the population level mean
+  oSurvPopL <- aggregate(logit(estList$oSurv),list(estList$stock),
+                        mean,na.rm=TRUE)$x
+  fwSurvPopL <- aggregate(logit(estList$fwSurv),list(estList$stock),
+                        mean,na.rm=TRUE)$x
+  # replace NAs with the mean logit value
+  tInd <- is.na(estList$oSurv)
+  oSurvL[tInd] <- oSurvPopL[estList$stock[tInd]]
+  tInd <- is.na(estList$fwSurv)
+  fwSurvL[tInd] <- fwSurvPopL[estList$stock[tInd]]
+  function(){
+    list(
+      oSurvL = oSurvL,
+      fwSurvL = fwSurvL,
+      oSurvPopL = oSurvPopL,
+      fwSurvPopL = fwSurvPopL
+    )
+  }
+}
+
+initValFunc <- createInitValFunc(estList)
+```
+
+
+## Priors
+
+```{r echo=FALSE}
+# Here's some data that my be useful
+# data from Bradford 1995
+#  these are egg to smolt instananeous mortality rates
+#  so survival is exp(-M)
+sDat <- data.frame(
+  population=c("Black","Deer","Flynn","Carnation","Hunt",
+               "Karymaisky","Needle","Minter","Nile","Qualicum"),
+  mean=c(4.17,3.37,4.02,3.88,4.64,5.93,4.45,3.79,4.33,4.40),
+  sd=c(0.93,0.41,0.90,0.47,1.04,0.77,0.89,0.83,0.42,0.79)
+  )
+qM <- quantile(sDat$mean,prob=c(0,0.25,0.5,0.75,1.0))
+```
+
+The code above specifies many priors in the code, but requires but also uses a few constants.
+So we need to create priors for mean of the freshwater and ocean survival hyper priors, and slope parameter defining the relationship between miles and smolt capacity.
+
+Freshwater survival is the maxium survival from egg to smolt. 
+From Bradford et al 2000 the productivity parameter for the hockey stick is 85 smolt per female (sd=31). converting that to smolt per egg we get 85/3000 =  0.02833. This has to be logit transformed to be used in the logit normal distribution (logit(0.02833) = -3.535). Notice that logit(2x0.02833) = -2.812 and logit(0.5x0.02833) = -4.243 so it seems reasonable to set a sd to 3.
+
+```{r warning=FALSE, message=FALSE}
+fwSurvMuPrior <- c(logit(85 / 3000), 1/(2*2))
+# but looking at the data it looks like 0.05 if more reasonable
+fwSurvMuPrior <- c(logit(0.5), 1/(3*3))
+fwSurvSD <- 1/sqrt(fwSurvMuPrior)
+hist(invLogit(rnorm(1000000,fwSurvMuPrior[1],fwSurvSD)),breaks=seq(0,1,by=0.0025),xlim=c(0,0.2),main="",xlab="Freshwater survival")
+```
+
+There are a number of potential sources for marine survival estimates. Bradford et al. 2000 gave a range of around 0.01 and 0.1 (although some survivals were higher). Here we use a logit normal distribution with median of logit(5%) and sd of 1.5. It's important to note that there can be significant temporal patterns in marine survival.
+
+```{r warning=FALSE,message=FALSE}
+oSurvMuPrior <- c(logit(0.05), 1/(1.5*1.5))
+sdVal <- 1/sqrt(oSurvMuPrior)
+hist(invLogit(rnorm(1000000,oSurvMuPrior[1],sdVal)),breaks=seq(-0.1,1,by=0.01),main="",xlab="Marine survival",xlim=c(0,0.5))
+```
+
+The slope relating capacity to river miles cannot have a zero slope for it's prior since the relationship is forced to go through the proportion. Therefore, it is important to come up with reasonable priors. Here we can use the smolt/km values from the Bradford 1997 paper. We could also use the K values from the Bradford 2000 paper.
+Bradford 1997 (for 45 degrees lat) = 457 smolt/km (50% quantile = 291-868 )
+Bradford 2000 (for all pops & using hockey stick fits) 1390 with sd=819
+
+```{r}
+capSlopePrior <- c(log(500), 0.75)
+hist(rlnorm(1000000,capSlopePrior[1],capSlopePrior[2]),breaks=seq(0,100000,by=100),xlim=c(0,5000),main="",xlab="capSlope")
+```
+
+combine priors into a list.
+
+```{r}
+priors <- list(fwSurvMuPrior=fwSurvMuPrior, 
+               oSurvMuPrior=oSurvMuPrior,
+               capSlopePrior=capSlopePrior)
+```
+
+Now I need to come up with some reasonable initial values
+
+Now run the model:
+
+This isn't working right now and it is VERY slow.
+Solutions:
+-  Come up with some initial values.
+-  reparameterize (centered). Not sure how to do this with survivals!
+-  could try everything in terms of log normals since the survivals are so small! I would probably have to truncate though? Can't have ocean survival > 1. Or is that really a problem?? It's nice to have things constrained.
+-  maybe try just fitting the LCM populations first!
+
+```{r}
+library(R2jags)
+saveList <- c("fwSurv","fwSurvPopL","fwSurvMu","fwSurvSD", 
+              "oSurv","oSurvPopL","oSurvMu","oSurvSD",
+              "capSlope","logCapSD",
+              "yearEffectOS","yearEffectTauOS",
+              "smolt","escapement","spawnersWild")
+
+MCMCsims <- 1000
+mm <- MCMCsims/1000 # thin to 1000
+#tmp <- rep(NA,datLCM$N,fwSurvPopL=rep(logit(0.05,datLCM$Npops)))
+inits <- list(fwSurvPopL=logit(fwSurvPop)+1,oSurvPopL=logit(oSurvPop)+1)
+#inits <- list(fwSurvL=rep(logit(0.05),datLCM$N))
+m1 <- jags(data=c(datLCM,priors), inits=initValFunc, parameters.to.save=saveList, 
+           model.file="bmod.txt",n.chains=3, n.iter=1100*mm, n.burnin=100*mm, 
+           n.thin=mm,DIC=TRUE, digits=5)
+
+```
+
+Now see if I can get things to run.
+
+

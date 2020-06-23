@@ -1,0 +1,148 @@
+---
+title: "OCN MSE simulations"
+author: "Martin"
+date: "May 11, 2020"
+output: html_document
+---
+
+## Literature
+
+Note that it is difficult to make forcasts based on short time series. The best model was generally that last years value except for cyclic data like salmon.
+
+Ward et al. 2014 paper [](https://onlinelibrary.wiley.com/doi/epdf/10.1111/j.1600-0706.2014.00916.x)
+Synthesis from the paper: *"Evaluating the data support for multiple plausible models has been an integral focus of many ecological analyses. However, the most commonly used tools to quantify support have weighted models’ hind-casting and forecasting abilities.For many applications, predicting the past may be of little interest. Concentrating only on the future predictive performance of time series models, we performed a forecasting competition among many different kinds of statistical models, applying each to many different kinds of vertebrate time series of population abundance. Low-dimensional (simple) models performed well overall, but more complex models did slightly better when applied to time series of cyclic species (e.g. salmon)."*
+
+## Background
+
+Here's some random observations after reading some of the documents from Craig on 5/21/2010 (in response to Rishi's inquiry to Craig and Matt Falcy)
+
+from page 62 2020 preseason report they talk about using an ensemble of GAM models to predict ocean survival. It looks like the R2 for the ensemble prediction is about 0.7?
+
+"A final set of six models using six different environmental indices plus parent spawner abundance was chosen from the possible model combinations. When averaging the predictions from the set of models (the ensemble mean), a higher skill (in terms of variance explained or cross-validation) was achieved than by selecting any single model. Making multiple forecasts from a set of models also provides a range of possible outcomes that reflects, to some degree, the uncertainty in understanding how salmon productivity is driven by ocean conditions."
+
+"Based on parent escapement levels and observed OPI smolt-to-jack survival for 2017 brood OPI smolts, the total allowable OCN coho exploitation rate for 2020 fisheries is no greater than 15.0 percent under the Salmon FMP (Amendment 13) and no greater than 15.0 percent under the matrix developed by the OCN Coho Work Group during their review of Amendment 13 (Table V-8; Appendix A, Tables A-2 and A-3, respectively)."
+
+I think this is table III-1 that Craig was refering to.
+
+![](../fromCraigFoster5_21_2020/modelResults_p62.png)
+Here's table C4
+
+![](../fromCraigFoster5_21_2020/table C4.png)
+
+Here's the management table (A4):
+
+![](../fromCraigFoster5_21_2020/table A4.png)
+
+
+Based on the verbage below it looks like the use jack returns to the life cycle modeling sites. I'm just not sure how. Do they regress jacks/smolt against estimates of post season ocean survival from the smolt to adult returns for the LCM sites?
+
+"The Salmon Technical Team (STT) and the Salmon Subcommittee of the Science and Statistical Committee (SSC) held a webinar on October 17, 2017 to review methodology changes for 2018. The only item on the agenda was an issue with the harvest management matrix for Oregon coastal natural (OCN) coho. The matrix prescribes maximum allowable exploitation rates based on brood year spawning escapement levels and a marine survival index. Data is derived from jack returns to six life-cycle monitoring sites, and the baseline data is updated annually. Due to funding limitations, Oregon Department of Fish and Wildlife (ODFW) has discontinued use of the northernmost life-cycle monitoring site in the Nehalem basin, which leaves five sites in operation."
+
+It looks like they already use the 6 LCM sites for management (D2a_Sup_SSC...):
+
+"An ensemble of models is annually re-fit to OCN smolt-to-adult return rates estimated from six life cycle monitoring (LCM) sites throughout Oregon." 
+
+So, maybe this is how they get the ocean survival. But they also say that they use parent stock size (in some of the verbage above?).
+
+## What I still don't understand
+
+I think they predict **adult abundance** based on the yearly GAM fit to ocean indices and parent abundance (see above). Apprently they also use jack returns to the LCM sites. I assume this is what they use to estimate **ocean survival**. 
+
+For the **adult abundance** they report a R2 of 0.7 (on the log scale?). I think we can turn this in to an observation error model. I'm not sure what kind of error they have when estimating **ocean survival**.
+
+It seems like they would want to use the **ocean survival** predictions when making predictions for **adult abundance**.
+
+
+## Plans
+
+Based on the information above, it sounds like they are already doing something pretty reasonable (i.e. using the smolt data to come up with predicted adult abundance and ocean survival? and not basing any management on fixed SR relationships.)
+
+
+Our current plan is to :
+
+1)  Fit a model to the 6 sites (done)
+
+2)  Simulate forward in time and for each year:
+    a)  Take the known number of adults and add some observation error (maybe R2=0.7 from above?)
+    b)  Take the known ocean survival and add noise (this is presumably based on the smolt to jack ratios?)
+    c)  Choose a harvest stragegy based on the predicted adult abundance and ocean survival.
+    d)  Implement the harvest stragegy for that year with some amount of implementation error (not sure what is a good value for this. Would need pre and post season FRAM estimates or something comparable.).
+
+3)  Repeat this process many (e.g. 1000) times under different ocean and freshwater scenarios.
+
+4)  Calculate different performance metrics for each scenario. Could include things like the percentage of times Abundance is above or below certain thresholds.
+
+Questions:
+
+1)  Should we model all 6 populations together or just one generic population. If we model all populations then we can use the range to look at variability in performance. 
+
+2)  If we model the 6 populations, should we model them simultaneously using the estimated common ocean and freshwater process error? If so, I guess we could look at metrics that incorporate more than one pop. For example, portfolio effect kind of stuff. Maybe this is too much! We want to keep it simple.
+
+3)  Can I use the $R^2$=0.7 value to model observation error for adult abundance?
+
+4)  How do I model observation error for ocean survival. I don't actually need jacks data, just metrics of performance in predicting ocean survival from the actual data.
+
+5)
+
+### some notes from discussion with Rishi
+
+- what do they use to estimate abundance and ocean survival?
+  - Can we get a times series of those estimates + the updated post season estimates. 
+    This could be used to develope the observation error model
+- Use Nickelson & Lawson paper or something else to come up with 3 freshwater scenarios
+  that included different productivities and capacities.
+- Come up with 3 different average ocean survivals and couple those with
+  static and cyclic patterns.
+- Don't use 21 populations for now. Just use the 6 populations to make projections.
+
+## OLD PLANS
+
+We will assess different harvest control rules for Oregon Coast Coho populations using a simplified Management Stragegy Evalulation (MSE). This will be based on state space models fit to 6 Oregon populations with adult and smolt data as 21 populations with adult data.
+
+The steps will include:
+
+1)  Develop a simulation model for OCN populations that will be used for the MSE.
+    I'm not sure exactly how this should work. We could use one of the following options:
+    a)  Just develop a single generic model that represents the OCN populations.
+    b)  Develop a generic model for each of the 3 areas (North, Mid, South).
+    c)  Develop a model for each of the 21 OCN populations with adult data.
+    
+2)  Use the simulation model as the operating model for a management strategy evaluation. To do this we would need:
+    a)  An observation model that takes the simulation model variables and creates observed values used in management (predicted adult abundance and ocean survival?).
+    b)  A model that implements the harvest policy based on the observed management variables. This may or may not include implementation error.
+    c)  Development and calculation of metrics evaluating the performance of the different management stategies.
+    
+For step 1 our simulation model would include a smolt and adult stage. So, essentially the same thing as the process model used to fit to the 6 populations with smolt data. The model would consist of:
+1)  adult to smolt stage
+2)  smolt to adult stage
+
+The adult to smolt stage would be parameterized using the fit to the 6 populations with smolt data. We could either use populations within the 3 areas (North, Mid, South) to develop area specific estimates, or use a single generic adult to smolt model for all populations. A generic model would be easy (the hyper priors), but I'm not sure how we would get area specific estimates (at least formally using the posteriors).
+
+The smolt to adult stage is just an ocean survival. So, a log normal distribution with a mean and variance. We could also include some auto-correlation if we wanted to simulate more cyclical ocean conditions. Or, we could include some kind of trend. We can estimate the mean and variance for this by back calculating from the adult to adult fits. 
+
+$$Sp_{y+3} = f(Sp_y,p,c)e^{Z_{fw}}e^{Z_{oc}}=e^{Z_{fw}+Z_{oc}}=e^{Z_{tot}}$$ 
+
+1)  Fit a hierarchical state space model to the 6 populations with smolt data. This will produce a posterior distribution describing the joint probability of a) spawner to smolt productivity, b) spawner to smolt capacity per spawnable river km, and c) annual variability in freshwater productivity and ocean survival. Because this is a hierarchical model this can be produced for individual populations or a hypothetical population without data from the same group of populations. We will use this later distribution. 
+
+2)  To complete the smolt to spawner stage, we will use the adult to adult model for the 21 OCN popultions. 
+
+2)  Use the the posterior distribution to simulate forward in time under different ocean survival regimes. To do this for each of the 21 OCN populations we will need to have estimates of variability in ocean survival. We can back calculate this from adult to adult variability in the adult to adult models. Or we could fit the adult to adult model where we decompose productivity into adult to smolt and smolt to adult variability (where we use the posteriour from the 6 pop fit to place a strong prior on the mean and variability of the adult to smolt transition). 
+
+3)  Apply
+
+
+$$Sm_{y+1} = f(Sp_{y},P,C) \times Z_y$$
+
+where:
+
+$$Z_y \sim lognormal(0,\sigma_{fw})$$
+
+Then spawners in year $y+3$ is:
+
+$$Sp_{y+3} = Sm_{y+1} \times \mu_{os} \times W_{y+1}$$
+
+where:
+
+$$W_{y+1} \sim lognormal(0,\sigma_{os})$$
+
+Here, the variability in ocean survival is derived from....
