@@ -4,7 +4,8 @@
 \alias{createJAGSdata}
 \title{create a data list for the JAGS models}
 \usage{
-createJAGSdata(dataDir = "", dataType = "smolt", includeSmolt = TRUE)
+createJAGSdata(dataDir = "", dataType = "smolt", includeSmolt = TRUE,
+  habType = "area")
 }
 \arguments{
 \item{dataDir}{the directory of the file together.csv.}

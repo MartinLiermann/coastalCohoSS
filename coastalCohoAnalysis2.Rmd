@@ -10,13 +10,13 @@ output:
     toc_float: true
     code_folding: hide
 params:
-  runMod: FALSE
+  runMod: TRUE
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 workDir <- "//nwcfile/home/liermannma/CurrentWorrk/consulting/sept2018_sept2019/oregonCoho"
-workDir <- "C://Users/Martin.Liermann/Documents/spring2020/oregonCoho"
+workDir <- "C://Users/Martin.Liermann/Documents/projects/oregonCoho"
 runsDir <- paste(workDir,"runs",sep="/")
 dataDir <- paste(workDir,"data",sep="/")
 ```
@@ -78,7 +78,7 @@ The population specific productivity parameters are assumed to come from a logno
 
 $$ln(prod_b) \sim normal(ln(\mu_{prod}),\sigma_{prod})$$
 
-The smolt are then multiplied by an ocean survival, $OS_y$ parameter that is allowed to vary by population and year and the harvest rate, $HR_y$, is applied. For the adult only data (the 21 OCN populations) we do not have smolt data so we set ocean survival to 1.
+The smolt are then multiplied by an ocean survival, $OS_y$ parameter that is allowed to vary by population and year and the harvest rate, $HR_y$, is applied. For the adult only data (the 21 OCN populations) we do not have smolt data so we set ocean survival to 1. This means that the productivity parameter now captures adult to adult vs adult to smolt.
 
 $$escapement_y = smolt_y OS_y (1-HR_y)$$
 
@@ -94,7 +94,7 @@ $$escapementObs_y \sim logN(escapement_y, \sigma_esc)$$
 
 $$smoltObs_y \sim logN(smolt_y, \sigma_smolt)$$
 
-If both the observation error for the smolts and adults and process error for recruitment residuals and ocean survival are population specific and free parameters, then these parameters will tend to be confounded. Therefore, we need to constrain one or the other. Here we fix observation error. While using incorrect observation error will likely result in biased results, this is likely better than ignorming observation error all together. We use an lognormal sigma of 0.15 which corresponds roughly to a CV of 15%. 
+If both the observation error for the smolts and adults and process error for recruitment residuals and ocean survival are population specific and free parameters, then these parameters will tend to be confounded. Therefore, we need to constrain one or the other. Here we fix observation error. While using incorrect observation error will likely result in biased results, this is likely better than ignoring observation error all together. We use an lognormal sigma of 0.15 which corresponds roughly to a CV of 15%. 
 
 Notice, in theory both observation and process error are estimable since process error affects the next generation while observatoin error does not.
 

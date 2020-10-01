@@ -1,0 +1,369 @@
+---
+title: "OCN Productivity"
+output: html_notebook
+---
+
+# Notes
+
+```{r set up, echo=FALSE, message=FALSE, warning=FALSE}
+# center drive working directory
+workDir <- "//nwcfile/home/liermannma/CurrentWorrk/consulting/sept2018_sept2019/oregonCoho"
+
+# local computer working directory
+workDir <-"C:\\Users\\Martin.Liermann\\Documents\\projects\\oregonCoho"
+
+dataDir <- paste(workDir,"data",sep="/")
+library(coastalCohoSS)
+```
+
+
+```{r load the data, echo=FALSE, message=FALSE, warning=FALSE}
+dat <- createJAGSdata(dataDir,"smolt",habType="miles")$fdat
+hdat <- createJAGSdata(dataDir,"smolt",habType="miles")$hdat
+```
+
+Create a table with the necessary information.
+
+```{r}
+# create some new derived variables
+tDat <- dat %>% left_join(hdat,by="Site") %>% 
+  mutate(femaleSpawners=FemaleParentsWild+FemaleParentsHatchery,
+         femaleSpawnersPerMile=femaleSpawners/miles,
+         smoltPerMile=Smolts/miles,
+         pHOS <- FemaleParentsHatchery/(FemaleParentsHatchery + FemaleParentsWild))
+
+```
+
+Now plot the data
+
+```{r warning=FALSE, message=FALSE}
+library(ggplot2)
+ggplot(tDat,aes(x=femaleSpawners,y=Smolts)) +
+  geom_point() +
+  xlim(0,NA) +
+  ylim(0,NA) +
+  facet_wrap(.~Site,scales="free")
+```
+
+Now divide smolt and spawners by miles to place on a comparable scale.
+
+```{r warning=FALSE, message=FALSE}
+library(ggplot2)
+ggplot(tDat,aes(x=femaleSpawnersPerMile,y=smoltPerMile)) +
+  geom_point() +
+  xlim(0,NA) +
+  ylim(0,NA) +
+  facet_wrap(.~Site,scales="free")
+```
+
+now divide by area
+
+```{r warning=FALSE, message=FALSE}
+library(ggplot2)
+ggplot(tDat,aes(x=femaleSpawners/area,y=Smolts/area)) +
+  geom_point() +
+  xlim(0,NA) +
+  ylim(0,NA) +
+  facet_wrap(.~Site,scales="free")
+```
+
+Now fit spawner recruit functions.
+
+
+```{r}
+  hockeyStick <- function(S,a,b){
+    pmin(log(a)+log(S),log(b))
+  }
+
+  bevHolt <- function(S,a,b){
+    log(S/(1/a+S/b))
+  }
+
+  SS_HockeyStick <- function(p,S,R){
+    sum((log(R)-hockeyStick(S,exp(p[1]),exp(p[2])))^2)/length(S)
+  }
+
+  SS_bevHolt <- function(p,S,R){
+    sum((log(R)-bevHolt(S,exp(p[1]),exp(p[2])))^2)/length(S)
+  }
+
+  fitHockeyStick <- function(S,R){
+    keepVals <- is.finite(S) & is.finite(R)
+    S <- S[keepVals]
+    R <- R[keepVals]
+    p <- c(max(log((R+0.001)/(S+0.001))),mean(log(R)))
+    tmp <- optim(p,SS_HockeyStick, method = "SANN",control = list(temp=5000,tmax=5000),S=S,R=R)
+    tmp <- nlm(SS_HockeyStick,tmp$par ,S=S,R=R)
+    tmp$par <- c(tmp$estimate,tmp$minimum)
+    tmp
+  }
+
+  fitBevHolt <- function(S,R){
+    keepVals <- is.finite(S) & is.finite(R)
+    S <- S[keepVals]
+    R <- R[keepVals]
+    p <- c(max(log((R+0.001)/(S+0.001))),mean(log(R)))
+    tmp <- optim(p,SS_bevHolt, method = "SANN",control = list(temp=5000,tmax=5000),S=S,R=R)
+    tmp <- nlm(SS_bevHolt,tmp$par ,S=S,R=R)
+    tmp$par <- c(tmp$estimate,tmp$minimum)
+    tmp
+  }
+
+  addBevHolt <- function(S,R){
+    tmp <- fitBevHolt(S,R)
+    xx <- seq(from=0,max(S,na.rm=T),length.out=100)
+    lines(xx,exp(bevHolt(xx,exp(tmp$par[1]),exp(tmp$par[2]))),lwd=2,col=rgb(0.1,0.1,0.9,0.5))
+    invisible(tmp)
+  }
+
+  addHockeyStick <- function(S,R){
+    tmp <- fitHockeyStick(S,R)
+    xx <- seq(from=0,max(S,na.rm=T),length.out=100)
+    lines(xx,exp(hockeyStick(xx,exp(tmp$par[1]),exp(tmp$par[2]))),lwd=2,col=rgb(0.1,0.1,0.9,0.5))
+    invisible(tmp)
+  }
+
+
+```
+
+```{r}
+sites <- unique(tDat$Site)
+par(mfrow=c(2,3))
+
+for(site in sites){
+  tt <- tDat[tDat$Site==site,]
+  S <- tt$femaleSpawners/tt$area
+  R <- tt$Smolts/tt$area
+  plot(S,R,pch=16,xlim=c(0,max(S,na.rm=TRUE)),ylim=c(0,max(R,na.rm=TRUE)),bty="l",main=site)
+  bhVals <- addBevHolt(S,R)
+  hsVals <- addHockeyStick(S,R)
+}
+```
+
+All together standardizing by basin area.
+
+```{r}
+S <- tDat$femaleSpawners/tDat$area
+R <- tDat$Smolts/tDat$area
+library(RColorBrewer)
+pCols <- brewer.pal(n = 6, name = "Dark2")
+names(pCols) <- unique(tDat$Site)
+plot(S,R,pch=16,xlim=c(0,max(S,na.rm=TRUE)*1.1),
+     ylim=c(0,max(R,na.rm=TRUE)*1.1),col=pCols[tDat$Site],
+     bty="l",xaxs="i",yaxs="i")
+legend("bottomright",legend=names(pCols),col=pCols,pch=rep(16,6))
+```
+
+Same thing but standardizing by miles
+
+```{r}
+S <- tDat$femaleSpawners/tDat$miles
+R <- tDat$Smolts/tDat$miles
+library(RColorBrewer)
+pCols <- brewer.pal(n = 6, name = "Dark2")
+names(pCols) <- unique(tDat$Site)
+plot(S,R,pch=16,xlim=c(0,max(S,na.rm=TRUE)*1.1),
+     ylim=c(0,max(R,na.rm=TRUE)*1.1),col=pCols[tDat$Site],
+     bty="l",xaxs="i",yaxs="i")
+legend("bottomright",legend=names(pCols),col=pCols,pch=rep(16,6))
+```
+
+
+```{r}
+datLCMall <- createJAGSdata(dataDir,"smolt",habType="miles")
+datOCNall <- createJAGSdata(dataDir,"OCN",habType="miles")
+datLCM <- datLCMall$jagsDat
+datOCN <- datOCNall$jagsDat
+
+firstYrLCM <- min(createJAGSdata(dataDir,"smolt")$fdat$BroodYear)
+firstYrOCN <- min(createJAGSdata(dataDir,"OCN")$fdat$broodYear)
+yrDiff <- (firstYrLCM-firstYrOCN)
+
+# stack the LCM data ontop of the OCN data
+dat <- list()
+
+# data for all years and populations (process model N total)
+dat$N <- datLCM$N + datOCN$N
+dat$stock <- c(datLCM$stock, datOCN$stock+datLCM$Npops)
+dat$LCM <- rep(c(1,0), c(datLCM$N,datOCN$N))
+dat$pHOS <- c(datLCM$pHOS,datOCN$pHOS)
+dat$HR <- c(datLCM$HR,datOCN$HR)
+dat$year <- c(datLCM$year + yrDiff,datOCN$year)
+dat$escStartInd <- c(datLCM$escStartInd, datOCN$escStartInd + datLCM$N)
+dat$escStopInd <- c(datLCM$escStopInd, datOCN$escStopInd + datLCM$N)
+dat$Nyears <- diff(range(dat$year))+1
+
+# populations
+dat$Npops <- datLCM$Npops + datOCN$Npops
+dat$habVar <- c(datLCM$habVar,datOCN$habVar)
+
+# observed escapement
+dat$escapementObs <- c(datLCM$escapementObs,datOCN$escapementObs)
+dat$escInd <- c(datLCM$escInd,datOCN$escInd+datLCM$Nesc)
+dat$Nesc <- datLCM$Nesc + datOCN$Nesc
+
+# observed smolt (only for LCM pops)
+dat$smoltObs <- datLCM$smoltObs
+dat$smoltInd <- datLCM$smoltInd
+dat$Nsmolt <- datLCM$Nsmolt
+
+popNames <- c(datLCMall$siteNames,datOCNall$siteNames)
+year <- c(datLCMall$fdat$BroodYear,datOCNall$fdat$broodYear)
+years <- min(year):max(year)
+```
+
+```{r}
+library(ggplot2)
+
+yrInd <- which((years %% 5)==0)
+yrLabs <- years[yrInd]
+
+tDat <- data.frame(
+  Escapement = rep(NA,dat$N),
+  Smolt = rep(NA,dat$N),
+  Population = dat$stock,
+  Year = dat$year,
+  pHOS = dat$pHOS,
+  HR = dat$HR,
+  LCM = dat$LCM,
+  oSurv = rep(NA,dat$N),
+  A2A = rep(NA,dat$N)
+)
+tDat$Escapement[dat$escInd] <- dat$escapementObs
+tDat$Smolt[dat$smoltInd] <- dat$smoltObs
+
+for(p in 1:dat$Npops){
+  e1 <- dat$escStartInd[p]
+  e2 <- dat$escStopInd[p]
+  eRng <- (e1+3):e2
+  if(dat$LCM[p]==1){
+    tDat$oSurv[eRng] <- tDat$Escapement[eRng]/(1-tDat$HR[eRng])/tDat$Smolt[eRng-3]
+  }
+  tDat$A2A[eRng] <- (tDat$Escapement[eRng]/(1-tDat$HR[eRng]))/
+                    (tDat$Escapement[eRng-3]/(1-tDat$pHOS[eRng-3]))
+}
+
+tmpNams <- popNames
+names(tmpNams)=1:dat$Npops
+pop.names <- as_labeller(tmpNams)
+
+# ggplot(tDat,aes(x=Year,y=Escapement)) +
+#   geom_line() +
+#   facet_grid(Population~.,scales="free_y")
+# 
+# ggplot(tDat[tDat$LCM==1,],aes(x=Year,y=Smolt)) +
+#   geom_line() +
+#   facet_grid(Population~.,scales="free_y")
+# 
+# ggplot(tDat[tDat$LCM==1,],aes(x=Year,y=Smolt/Escapement)) +
+#   geom_line() +
+#   facet_grid(Population~.,scales="free_y")
+# 
+# ggplot(tDat[tDat$LCM==1,],aes(x=Year,y=oSurv)) +
+#   geom_line() +
+#   facet_grid(Population~.,scales="free_y",labeller=pop.names)
+
+tmp <- tDat %>% group_by(Population) %>%
+  mutate(escStnd=as.numeric(scale(log(Escapement))),
+         smoltStnd=as.numeric(scale(log(Smolt))),
+         A2AStnd=as.numeric(scale(log(A2A))),
+         oSurvStnd=as.numeric(scale(log(oSurv))))%>%
+  ungroup()
+```
+
+Here's a plot of log standardized escapement (orange is negative and blue positive)
+
+```{r fig.width=8,fig.height=12}
+pCol = c("orange","slateblue")
+ggplot(tmp,aes(x=Year,y=Population)) +
+  geom_point(aes(size=abs(tmp$escStnd)),color=pCol[sign(tmp$escStnd)/2+1.5]) +
+  scale_size_continuous(range = c(0,4)) +
+  scale_x_continuous(breaks=yrInd, labels=yrLabs) +
+  scale_y_continuous(breaks = 1:dat$Npops,labels=popNames) +
+  theme(axis.text.x = element_text(color="black", size=7, angle=45)) +
+  theme_bw()
+```
+
+Same thing for (adult[y+3]/(1-HR[y+3])) / (adult[y]/(1-pHOS[y]))
+
+```{r fig.width=8,fig.height=12}
+ggplot(tmp,aes(x=Year,y=Population)) +
+  geom_point(aes(size=abs(tmp$A2AStnd)),color=pCol[sign(tmp$A2AStnd)/2+1.5]) +
+  scale_size_continuous(range = c(0,4)) +
+  scale_x_continuous(breaks=yrInd, labels=yrLabs) +
+  scale_y_continuous(breaks = 1:dat$Npops,labels=popNames) +
+  theme(axis.text.x = element_text(color="black", size=7, angle=45)) +
+  theme_bw()
+```
+
+Same thing for smolt to adult survival.
+(adult[y+3]/(1-HR[y+3])) / smolt[y]
+
+```{r fig.width=8,fig.height=6}
+lcmDat <- tmp[tmp$LCM==1,]
+ggplot(lcmDat,aes(x=Year,y=Population)) +
+  geom_point(aes(size=abs(lcmDat$oSurvStnd)),color=pCol[sign(lcmDat$oSurvStnd)/2+1.5]) +
+  scale_size_continuous(range = c(0,4)) +
+  scale_x_continuous(breaks=yrInd, labels=yrLabs) +
+  scale_y_continuous(breaks = 1:dat$Npops,labels=popNames) +
+  theme(axis.text.x = element_text(color="black", size=7, angle=45)) +
+  theme_bw()
+```
+
+Now let's use some back of the envelope calculations to estimate some parameters.
+
+```{r}
+  hockeyStick <- function(S,a,b){
+    pmin(log(a)+log(S),log(b))
+  }
+
+  bevHolt <- function(S,a,b){
+    log(S/(1/a+S/b))
+  }
+
+  SS_HockeyStick <- function(p,S,R){
+    sum((log(R)-hockeyStick(S,exp(p[1]),exp(p[2])))^2)
+  }
+
+  SS_bevHolt <- function(p,S,R){
+    sum((log(R)-bevHolt(S,exp(p[1]),exp(p[2])))^2)
+  }
+
+  fitHockeyStick <- function(S,R){
+    keepVals <- is.finite(S) & is.finite(R)
+    S <- S[keepVals]
+    R <- R[keepVals]
+    p <- c(max(log((R+0.001)/(S+0.001))),mean(log(R)))
+    tmp <- optim(p,SS_HockeyStick, method = "SANN",control = list(temp=5000,tmax=5000),S=S,R=R)
+    tmp <- nlm(SS_HockeyStick,tmp$par ,S=S,R=R)
+    tmp$par <- tmp$estimate
+    tmp
+  }
+
+  fitBevHolt <- function(S,R){
+    keepVals <- is.finite(S) & is.finite(R)
+    S <- S[keepVals]
+    R <- R[keepVals]
+    p <- c(max(log((R+0.001)/(S+0.001))),mean(log(R)))
+    tmp <- optim(p,SS_bevHolt, method = "SANN",control = list(temp=5000,tmax=5000),S=S,R=R)
+    tmp <- nlm(SS_bevHolt,tmp$par ,S=S,R=R)
+    tmp$par <- tmp$estimate
+    tmp
+  }
+
+  addBevHolt <- function(S,R){
+    tmp <- fitBevHolt(S,R)
+    xx <- seq(from=0,max(S,na.rm=T),length.out=100)
+    lines(xx,exp(bevHolt(xx,exp(tmp$par[1]),exp(tmp$par[2]))),lwd=2,col=rgb(0.1,0.1,0.9,0.5))
+  }
+
+  addHockeyStick <- function(S,R){
+    tmp <- fitHockeyStick(S,R)
+    xx <- seq(from=0,max(S,na.rm=T),length.out=100)
+    lines(xx,exp(hockeyStick(xx,exp(tmp$par[1]),exp(tmp$par[2]))),lwd=2,col=rgb(0.1,0.1,0.9,0.5))# rgb(0.9,0.6,0.1,0.5))
+  }
+
+
+```
+
+

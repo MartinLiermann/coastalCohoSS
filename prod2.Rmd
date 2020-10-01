@@ -1,0 +1,346 @@
+---
+title: "OCN coho"
+author: "Martin Liermann"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    theme: sandstone
+    highlight: tango 
+    toc: true
+    toc_float: true
+    code_folding: hide
+params:
+  runMod: FALSE
+---
+
+```{r}
+# center drive working directory
+workDir <- "//nwcfile/home/liermannma/CurrentWorrk/consulting/sept2018_sept2019/oregonCoho"
+
+# local computer working directory
+workDir <-"C:\\Users\\Martin.Liermann\\Documents\\projects\\oregonCoho"
+
+# directory with the data and run results
+dataDir <- paste(workDir,"data",sep="/")
+runsDir <- paste(workDir,"runs",sep="/")
+
+# load the library 
+library(coastalCohoSS)
+
+# define some colors
+greenT <- rgb(0.2,0.8,0.2,0.2)
+
+```
+
+```{r}
+# data from Bradford 1995
+#  these are egg to smolt instananeous mortality rates
+#  so survival is exp(-M)
+sDat <- data.frame(
+  population=c("Black","Deer","Flynn","Carnation","Hunt",
+               "Karymaisky","Needle","Minter","Nile","Qualicum"),
+  mean=c(4.17,3.37,4.02,3.88,4.64,5.93,4.45,3.79,4.33,4.40),
+  sd=c(0.93,0.41,0.90,0.47,1.04,0.77,0.89,0.83,0.42,0.79)
+  )
+sDat$surv <- exp(-sDat$mean)
+qM <- quantile(sDat$mean,prob=c(0,0.25,0.5,0.75,1.0))
+qS <- quantile(sDat$surv,prob=c(0,0.25,0.5,0.75,1.0))
+```
+
+Run the model for the 21 OCN populations using the Beverton Holt, modified Beverton Holt and Hockey stick. 
+
+```{r eval=params$runMod}
+MCMCsims <- 100000
+
+library(coastalCohoSS)
+dat <- createJAGSdata(dataDir,"OCN")
+initValFunc <- createInitValsFunc(dat)
+priors <- createDefaultPriors()
+priors$prodMuPior <- c(log(4),1/(2^2))
+
+bmod <- createJAGScode(fixedObsError=c(0.15,0.15), smoltData=FALSE,SRtype="HS")
+m1 <- runJAGSmodel(bmod, dat, priors, calcInits=initValFunc, MCMCsims=MCMCsims)
+bmod <- createJAGScode(fixedObsError=c(0.15,0.15), smoltData=FALSE,SRtype="BH")
+m2 <- runJAGSmodel(bmod, dat, priors, calcInits=initValFunc, MCMCsims=MCMCsims)
+bmod <- createJAGScode(fixedObsError=c(0.15,0.15), smoltData=FALSE,SRtype="BH3")
+m3 <- runJAGSmodel(bmod, dat, priors, calcInits=initValFunc, MCMCsims=MCMCsims)
+
+saveRDS(m1,paste(runsDir,"mHSocn.Rdat",sep="/"))
+saveRDS(m2,paste(runsDir,"mBHocn.Rdat",sep="/"))
+saveRDS(m3,paste(runsDir,"mBH3ocn.Rdat",sep="/"))
+```
++
+```{r eval=!params$runMod}
+m1 <- readRDS(paste(runsDir,"mHSocn.Rdat",sep="/"))
+m2 <- readRDS(paste(runsDir,"mBHocn.Rdat",sep="/"))
+m3 <- readRDS(paste(runsDir,"mBH3ocn.Rdat",sep="/"))
+```
+
+```{r}
+# calculate some intermediate values
+x1 <- getPostDraws(m1)
+x2 <- getPostDraws(m2)
+x3 <- getPostDraws(m3)
+```
+
+Look at productivity estimates.
+
+```{r}
+# a function to create a long form of the posterior distribution for
+# parameters that are population specific (e.g. productivity and capacity)
+createLong <- function(x,pVar){
+  tmp <- as.data.frame(x[[pVar]])
+  colnames(tmp) <- m1$dat$siteNames
+  ss <- tmp %>% pivot_longer(everything(),names_to="River")
+}
+
+# combine the results for the different spawner recruit functions
+SRfuncNames <- c("Hockey stick","Beverton Holt","Beverton Holt (mod)")
+xx <- rbind(createLong(x1,"prod"),createLong(x2,"prod"),createLong(x3,"prod"))
+n <- length(xx$River)/3
+xx$SRfunction <- rep(SRfuncNames,each=n)
+
+# create results for a "new" population with no data
+xx2 <- c(x1$logProdMu,x2$logProdMu,x3$logProdMu)
+n <- length(xx2)/3
+xx2 <- data.frame(SRfunction=rep(SRfuncNames,each=n),logProdMu=xx2)
+xx2$logProdSD <- c(x1$logProdSD,x2$logProdSD,x3$logProdSD)
+xx2$newProd <- rnorm(n*3,xx2$logProdMu,xx2$logProdSD)
+
+# create a data frame with median productivity values
+xx3 <- data.frame(medianProd=c(apply(x1$prod,2,median),apply(x2$prod,2,median),apply(x3$prod,2,median)))
+n <- length(xx3$medianProd)/3
+xx3$River <- rep(m1$dat$siteNames,3)
+xx3$SRfunction <- rep(SRfuncNames,each=n)
+
+```
+
+```{r}
+# bar plot summarizing productivity for the different populations and SR types
+brks <- 2^(0:50)
+ggplot(xx,aes(x=River,y=value,fill=SRfunction)) + 
+  geom_boxplot(color="black",outlier.shape = NA) +
+  coord_flip(ylim=c(1,2024)) +
+  theme_bw() +
+  scale_y_continuous(trans='log2',breaks=brks,labels=paste(brks))
+```
+
+```{r}
+# plot describing the distribution for a new population
+brks <- 2^(0:50) 
+ggplot(xx2,aes(x=exp(newProd),fill=SRfunction,color=SRfunction)) +
+  geom_density(alpha = 0.1) +
+  theme_bw() +
+  scale_x_continuous(trans='log2',breaks=brks,labels=paste(brks)) +
+  coord_cartesian(xlim=c(1,1000))+
+  facet_grid(SRfunction~.) + 
+  geom_vline(data=xx3,aes(xintercept=medianProd))
+```
+
+```{r message=FALSE}
+# Table with results
+qProd <- xx %>% 
+  group_by(River,SRfunction) %>%
+  summarize(med=median(value),q25=quantile(value,prob=0.25),q75=quantile(value,prob=0.75))
+
+qProdNew <- xx2 %>% 
+  group_by(SRfunction) %>%
+  mutate(value=exp(newProd)) %>%
+  summarize(med=median(value),
+            q25=quantile(value,prob=0.25),
+            q75=quantile(value,prob=0.75),
+            muLogProd=mean(newProd),sdLogProd=sd(newProd))
+
+knitr::kable(qProdNew,digits=3)
+```
+
+```{r}
+# temporal trends in common year effect
+x <- x3
+dat <- m1$dat
+yeQ <- apply(x$yearEffect,2,quantile,prob=c(0.1,0.25,0.5,0.75,0.9))
+yRange <- c(log(1/4),log(4))
+yrs <- seq(min(dat$fdat$broodYear),max(dat$fdat$broodYear),by=1)
+lineCol <- rgb(0.99,0.64,0.0,0.25)
+
+plot(yrs,yeQ[3,],ylim=yRange,xlab="Brood Year",ylab="Common year effect",type="o",bty="l",yaxt="n")
+lines(yrs,yeQ[2,],lty=3)
+lines(yrs,yeQ[4,],lty=3)
+pSamp <- sample(1:length(x$prod[,1]),25)
+for(smp in pSamp){
+  lines(yrs,x$yearEffect[smp,],col=lineCol)
+}
+
+yLabs <- 2^((-4:4))
+axis(side=2,at=log(yLabs),labels=yLabs,las=2)
+
+for(yy in yLabs) lines(range(yrs),rep(log(yy),2),lty=3,col="gray")
+
+legend("bottomright",lty=c(1,3),legend=c("Median","50% credible interval"))
+
+```
+
+```{r}
+# temporal trends in productivity
+x <- x3
+dat <- m1$dat
+yeQ <- apply(x$yearEffect+as.vector(x$logProdMu),2,quantile,prob=c(0.1,0.25,0.5,0.75,0.9))
+yRange <- c(log(1),log(150))
+yrs <- seq(min(dat$fdat$broodYear),max(dat$fdat$broodYear),by=1)
+lineCol <- rgb(0.99,0.64,0.0,0.25)
+
+plot(yrs,yeQ[3,],ylim=yRange,xlab="Brood Year",ylab="Common year effect",type="o",bty="l",yaxt="n")
+lines(yrs,yeQ[2,],lty=3)
+lines(yrs,yeQ[4,],lty=3)
+pSamp <- sample(1:length(x$prod[,1]),25)
+for(smp in pSamp){
+  lines(yrs,(x$yearEffect+as.vector(x$logProdMu))[smp,],col=lineCol)
+}
+
+yLabs <- 2^((-4:20))
+axis(side=2,at=log(yLabs),labels=yLabs,las=2)
+
+for(yy in yLabs) lines(range(yrs),rep(log(yy),2),lty=3,col="gray")
+
+legend("bottomright",lty=c(1,3),legend=c("Median","50% credible interval"))
+
+```
+
+```{r}
+# some tabular values
+yrs <- min(m1$dat$fdat$broodYear):max(m1$dat$fdat$broodYear)
+tmpDat <- data.frame(broodYear=yrs,exp(t(yeQ)))
+names(tmpDat) <- c("BroodYear","q10","q25","q50","q75","q90")
+knitr::kable(tmpDat,digits=0)
+```
+
+```{r}
+# temporal trends in productivity
+
+```
+
+
+
+
+```{r}
+# extra stuff
+brks <- 2^(0:50) 
+ggplot(xx2,aes(x=exp(newProd),fill=SRfunction,color=SRfunction)) +
+  geom_density(alpha = 0.1) +
+  geom_density(alpha = 0.1) +
+  theme_bw() +
+  scale_x_continuous(trans='log2',breaks=brks,labels=paste(brks)) +
+  coord_cartesian(xlim=c(1,1000))+
+  facet_grid(SRfunction~.) + 
+  geom_vline(data=xx3,aes(xintercept=medianProd))
+
+brks <- 2^(0:50) 
+ggplot(xx2,aes(x=exp(newProd),fill=SRfunction,color=SRfunction)) +
+  geom_density(alpha = 0.1) +
+  theme_bw() +
+  scale_x_continuous(trans='log2',breaks=brks,labels=paste(brks)) +
+  coord_cartesian(xlim=c(1,1000))+
+  facet_grid(SRfunction~.) + 
+  geom_boxplot(data=xx3,aes(xintercept=medianProd))
+
+
+ggplot(xx2,aes(x=SRfunction,y=exp(newProd),fill=SRfunction)) + 
+  geom_boxplot(color="black",outlier.shape = NA) +
+  coord_flip() +
+  theme_bw() +
+  scale_y_continuous(trans='log2',breaks=brks,labels=paste(brks))
+
+ggplot(xx2,aes(x=SRfunction,y=exp(newProd),fill=SRfunction)) +
+  geom_boxplot(color="black",outlier.shape = NA) +
+  coord_flip() +
+  theme_bw() +
+  scale_y_continuous(trans='log2',breaks=brks,labels=paste(brks)) +
+  coord_cartesian(ylim = c(0,20))
+ 
+brks <- 2^(0:50) 
+ggplot(xx2,aes(x=SRfunction,y=exp(newProd),fill=SRfunction)) +
+  geom_boxplot(color="black",outlier.shape = NA) +
+  theme_bw() +
+  scale_y_continuous(trans='log2',breaks=brks,labels=paste(brks)) +
+  coord_flip(ylim=c(1,1000)) 
+
+brks <- 2^(0:50) 
+ggplot(xx2,aes(x=exp(newProd),fill=SRfunction,color=SRfunction)) +
+  geom_density(alpha = 0.1) +
+  theme_bw() +
+  scale_x_continuous(trans='log2',breaks=brks,labels=paste(brks)) +
+  coord_cartesian(xlim=c(1,1000))+
+  facet_grid(SRfunction~.)
+```
+
+
+
+
+```{r fig.width=12, fig.height=12, warning=FALSE}
+# create a plot of spawner to adult recruits (for 6 pops)
+#  and overlay the two model fits (use two bands)
+
+bdat <- m1$dat$jagsDat
+edat <- expandAllData(bdat)
+popNames <- m1$dat$siteNames
+sims <- length(x1$prod[,2])
+Npops <- bdat$Npops
+
+# calculate the the productivity and capacity values for the spawner to spawner SR functions
+OS <- array(rep(tapply(m3$dat$jagsDat$oceanSurv,m3$dat$jagsDat$stock,median),each=sims),
+            dim=c(sims,Npops))
+prodWOS <- x2$prod*OS
+capWOS <- x2$cap*OS
+
+# calculate different ocean regimes
+
+#####  spawners to trap model (prepare values) #####
+spawnersNO <- edat$escapementObs # natural origin spawners
+spawners <- spawnersNO/(1-edat$pHOS)
+Rtemp <- spawnersNO/(1-edat$HR)
+recruits <- numeric(length(Rtemp))
+for(i in 1:bdat$Npops){
+  recruits[bdat$stock==i] <- c(Rtemp[bdat$stock==i][-(1:3)],rep(NA,3))
+}
+
+##### estimate the SR params #####
+srF <- function(p,ss) ss/(1/p[1]^3 + ss^3/p[2]^3)^(1/3)
+fitBH <- function(ss,rr){
+  ssq <- function(pp,ss,rr){
+    p <- exp(pp)
+    sum((log(rr)-log(srF(p,ss)))^2)
+  }
+  bFit <- nlm(ssq,p=log(c(median(rr/ss),quantile(rr,prob=0.8))),ss,rr)
+  bFit
+}
+
+srDat <- data.frame(S=spawners, R=recruits, stock=edat$stock)
+srDat <- srDat[!is.na(srDat$S) & !is.na(srDat$R),] # remove NAs
+srParams <- array(NA,dim=c(bdat$Npops,2))
+
+par(mfrow=c(5,5))
+
+addBand <- function(prod,cap,ss,col=rgb(0,0,0,0.2)){
+  tmp <- col2rgb(col)
+  lnCol <- rgb(tmp[1]/255,tmp[2]/255,tmp[3]/255,0.9)
+  n <- length(ss)
+  R <- array(NA,dim=c(3,n))
+  for(i in 1:n){
+    R[,i] <- quantile(ss[i]/(1/prod^3+(ss[i]/cap)^3)^(1/3),prob=c(0.1,0.5,0.9))
+  }
+  polygon(x=c(ss,rev(ss)),y=c(R[1,],rev(R[3,])),col=col,border=rgb(0,0,0,0.5))
+  lines(ss,R[2,],col=lnCol)
+}
+
+for(st in 1:bdat$Npops){
+  sInd <- srDat$stock==st
+  ss <- seq(0,max(srDat$S[sInd]),length.out=1001)
+  xLim <- c(0,max(srDat$S[sInd]))
+  yLim <- c(0,max(srDat$R[sInd]))
+  r1 <- fitBH(srDat$S[sInd],srDat$R[sInd])
+  srParams[st,] <- exp(r1$estimate)
+  plot(srDat$S[sInd],srDat$R[sInd],pch=16,col="black",xlab="Spawners",ylab="Recruits",bty="l",main=popNames[st],xlim=xLim,ylim=yLim)
+  lines(ss,srF(exp(r1$estimate),ss=ss),lwd=2,col="black")
+  addBand(prodWOS[,st],capWOS[,st],ss,rgb(0.2,0.2,0.8,0.2))
+  grid()
+}

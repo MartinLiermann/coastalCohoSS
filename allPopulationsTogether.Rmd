@@ -6,7 +6,12 @@ output: html_document
 ---
 
 ```{r}
+# center drive working directory
 workDir <- "//nwcfile/home/liermannma/CurrentWorrk/consulting/sept2018_sept2019/oregonCoho"
+
+# local computer working directory
+workDir <-"C:\\Users\\Martin.Liermann\\Documents\\projects\\oregonCoho"
+
 dataDir <- paste(workDir,"data",sep="/")
 library(coastalCohoSS)
 ```
@@ -143,23 +148,20 @@ model
   
   for(i in 1:N){ # iterate over all years and populations
     
-    smolt[i] ~ dlnorm(log(muSmolt[i]), fwTau[stock[i]])
-    logSmolt[i] <- log(spawners[i]) - 
+    logSmolt[i] ~ dnorm(logSmoltMu[i], fwTau[stock[i]])
+    logSmoltMu[i] <- log(spawners[i]) - 
                    log(1/prod[stock[i]]^3 + (spawners[i]/cap[stock[i]])^3)/3
 
-    escapement[i] <- smolt[i] * oSurv[i] * (1 - HR[i])
-
-    logit(oSurv[i]) <- oSurvL[i]
-    oSurvL[i] ~ dnorm(commonOsurvL[year[i]]+oSurvPopL[stock[i]],
-                      oSurvPopTau[stock[i]])
- 
-  }
+    logEscapement[i] ~ dnorm(logEscapementMu[i],oSurvPopTau[stock[i]])
+    logEscapementMu[i] <- logSmolt[i] + yearEffectOS[year[i]] + 
+                          oSurvPopL[stock[i]] + log(1-HR[i])
+   }
   
   # offset escapement to produce spawners
   # spawners are in calendar years and escapement are in brood years
   for(pop in 1:Npops){
     for(i in (escStartInd[pop]+3):escStopInd[pop]){
-      spawnersWild[i] <- escapement[i-3]
+      spawnersWild[i] <- logEscapement[i-3]
       spawners[i] <- spawnersWild[i] / (1-pHOS[i])
     }
     # fill in the missing years with a vague prior
@@ -184,14 +186,12 @@ model
 
   # capacity
   capSlope ~ dlnorm(capSlopePrior[1],capSlopePrior[2])
-  logCapSD ~ dt(0,1,1)T(0,)  # half cauchy with var=tau=sd=1 # dunif(0,10) #
-  logCapTau <- 1.0/(logCapSD*logCapSD)
+  capSD ~ dt(0,1,1)T(0,)  # half cauchy with var=tau=sd=1 # dunif(0,10) #
 
-  # freshwater survival
-  fwSurvMu ~ dnorm(fwSurvMuPrior[1],fwSurvMuPrior[2])
-  fwSurvSD ~ dt(0,1,1)T(0,)  # half cauchy with var=tau=sd=1
-  fwSurvTau <- pow(fwSurvSD,-2)
-  
+  # productivity
+  logProdMu ~ dnorm(logProdMuPrior[1],logProdMuPrior[2])
+  prodSD ~ dt(0,1,1)T(0,)  # half cauchy with var=tau=sd=1
+
   # ocean survival
   oSurvMu ~ dnorm(oSurvMuPrior[1],oSurvMuPrior[2])
   oSurvSD ~ dt(0,1,1)T(0,)  # half cauchy with var=tau=sd=1
@@ -210,7 +210,7 @@ model
   
   # smolt data
   for(i in 1:Nsmolt){ # smolt trap count (spring)
-    smoltObs[i] ~ dlnorm(log(smolt[smoltInd[i]]),smoltObsTau)
+    smoltObs[i] ~ dlnorm(logSmolt[smoltInd[i]],smoltObsTau)
   }
   
   # escapement data
@@ -374,7 +374,7 @@ ggplot(lcmDat,aes(x=Year,y=Population)) +
   theme_bw()
 ```
 
-Now let's use some back of the envelopt calculations to estimate some parameters.
+Now let's use some back of the envelope calculations to estimate some parameters.
 
 ```{r}
   hockeyStick <- function(S,a,b){
@@ -430,6 +430,8 @@ Now let's use some back of the envelopt calculations to estimate some parameters
 
 ```
 
+for first model
+
 ```{r}
 tDat <- datLCM
 N <- tDat$N
@@ -464,6 +466,43 @@ for(p in 1:tDat$Npops){
 }
 
 estList <- list(oSurv=oSurv,fwSurv=fwSurv, stock=tDat$stock)
+
+```
+
+for simple log normal model
+
+```{r}
+tDat <- datLCM
+N <- tDat$N
+Npops <- tDat$Npops
+esc <- rep(NA,N)
+esc[tDat$escInd] <- tDat$escapementObs
+smlt <- rep(NA,N)
+smlt[tDat$smoltInd] <- tDat$smoltObs
+
+ss <- rep(NA,N)
+ee <- rep(NA,N)
+rr <- rep(NA,N)
+oSurv <- rep(NA,N)
+fwSurv <- rep(NA,N)
+cap <- rep(NA,Npops)
+prod <- rep(NA,Npops)
+
+for(p in 1:tDat$Npops){
+  y1 <- tDat$escStartInd[p]
+  y2 <- tDat$escStopInd[p]-3
+  yRng <- y1:y2
+  ss[yRng] <- esc[yRng]/(1-tDat$pHOS[yRng])
+  rr[yRng] <- (esc[yRng+3]/(1-tDat$HR[yRng+3]))
+  oSurv[yRng] <- rr[yRng]/smlt[yRng]
+  fwSurv[yRng] <- smlt[yRng]/ee[yRng]
+  f1 <- fitHockeyStick(ss[yRng],rr[yRng])
+  f2 <- fitHockeyStick(ss[yRng],smlt[yRng])
+  prod[p] <- exp(f2$estimate[1])
+  cap[p] <- exp(f2$estimate[2])
+}
+
+estList <- list(oSurv=oSurv,fwSurv=fwSurv, prod=prod, cap=cap, stock=tDat$stock)
 
 ```
 
@@ -577,6 +616,34 @@ createInitValFunc <- function(estList){
 initValFunc <- createInitValFunc(estList)
 ```
 
+now for simple model
+
+```{r}
+createInitValFunc <- function(estList){
+  # year and population specific logit survival values
+  oSurvL <- logit(estList$oSurv)
+  fwSurvL <- logit(estList$fwSurv)
+  # calculate the population level mean
+  oSurvPopL <- aggregate(log(estList$oSurv),list(estList$stock),
+                        mean,na.rm=TRUE)$x
+  fwSurvPopL <- aggregate(logit(estList$fwSurv),list(estList$stock),
+                        mean,na.rm=TRUE)$x
+  # replace NAs with the mean logit value
+  tInd <- is.na(estList$oSurv)
+  oSurvL[tInd] <- oSurvPopL[estList$stock[tInd]]
+  tInd <- is.na(estList$fwSurv)
+  fwSurvL[tInd] <- fwSurvPopL[estList$stock[tInd]]
+  function(){
+    list(
+      prod = estList$prod,
+      cap = estList$cap,
+      oSurvPopL = oSurvPopL
+    )
+  }
+}
+
+initValFunc <- createInitValFunc(estList)
+```
 
 ## Priors
 
@@ -603,7 +670,7 @@ From Bradford et al 2000 the productivity parameter for the hockey stick is 85 s
 ```{r warning=FALSE, message=FALSE}
 fwSurvMuPrior <- c(logit(85 / 3000), 1/(2*2))
 # but looking at the data it looks like 0.05 if more reasonable
-fwSurvMuPrior <- c(logit(0.5), 1/(3*3))
+fwSurvMuPrior <- c(logit(0.05), 1/(3*3))
 fwSurvSD <- 1/sqrt(fwSurvMuPrior)
 hist(invLogit(rnorm(1000000,fwSurvMuPrior[1],fwSurvSD)),breaks=seq(0,1,by=0.0025),xlim=c(0,0.2),main="",xlab="Freshwater survival")
 ```
@@ -632,6 +699,16 @@ priors <- list(fwSurvMuPrior=fwSurvMuPrior,
                oSurvMuPrior=oSurvMuPrior,
                capSlopePrior=capSlopePrior)
 ```
+
+
+For simple model.
+
+```{r}
+priors <- list(logProdMuPrior=log(1500*invLogit(fwSurvMuPrior)), 
+               oSurvMuPrior=oSurvMuPrior,
+               capSlopePrior=capSlopePrior)
+```
+
 
 Now I need to come up with some reasonable initial values
 
@@ -663,6 +740,24 @@ m1 <- jags(data=c(datLCM,priors), inits=initValFunc, parameters.to.save=saveList
 
 ```
 
-Now see if I can get things to run.
+Now see if I can get things to run using the simple log model.
 
 
+```{r}
+library(R2jags)
+saveList <- c("prod","cap","logProdMu","prodSD", 
+              "oSurv","oSurvPopL","oSurvMu","oSurvSD",
+              "capSlope","logCapSD",
+              "yearEffectOS","yearEffectTauOS",
+              "smolt","escapement","spawnersWild")
+
+MCMCsims <- 1000
+mm <- MCMCsims/1000 # thin to 1000
+#tmp <- rep(NA,datLCM$N,fwSurvPopL=rep(logit(0.05,datLCM$Npops)))
+#inits <- list(fwSurvPopL=logit(fwSurvPop)+1,oSurvPopL=logit(oSurvPop)+1)
+#inits <- list(fwSurvL=rep(logit(0.05),datLCM$N))
+m1 <- jags(data=c(datLCM,priors), inits=initValFunc, parameters.to.save=saveList, 
+           model.file="bmod.txt",n.chains=3, n.iter=1100*mm, n.burnin=100*mm, 
+           n.thin=mm,DIC=TRUE, digits=5)
+
+```

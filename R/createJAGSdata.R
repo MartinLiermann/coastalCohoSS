@@ -86,19 +86,25 @@ createJAGSdata <- function(dataDir="",dataType="smolt",includeSmolt=TRUE,habType
     
     # add harvest data
     fdat <- fdat %>% left_join(hrdat,by=c("BroodYear"="broodYear"))
+
+    # calculate the estimated proportion of hatchery origin fish 
+    #  this is based on females because we did not have the male hatchery fish numbers
+    pHOS <- fdat$FemaleParentsHatchery/(fdat$FemaleParentsHatchery + fdat$FemaleParentsWild)
     
     # calculate the total escapement and observed sex ratio
-    escapementObs <- fdat$FemaleParentsWild + fdat$MaleParentsWild
+    # because escapementObs includes natural and hatchery origin adjust for 
+    # hatchery fish
+    escapementObs <- (fdat$FemaleParentsWild + fdat$MaleParentsWild) / (1-pHOS)
     sexRatioObs <- fdat$FemaleParentsWild / escapementObs
     
     # fill in missing sex ratios using within population average (males are missing for initial years)
     for(site in sites){
       sexRatioObs[is.na(sexRatioObs) & fdat$site==site] <- mean(sexRatioObs[fdat$site==site],na.rm=TRUE)
     }
-    
-    # use the filled in sex ratios to fill in total escapement
+ 
+    # use the filled in sex ratios to fill in total escapement 
     naInd <- is.na(escapementObs)
-    escapementObs[naInd] <- fdat$FemaleParentsWild[naInd] / sexRatioObs[naInd]
+    escapementObs[naInd] <- (fdat$FemaleParentsWild[naInd] / sexRatioObs[naInd])/(1-pHOS[naInd]) 
     
     # smolt observations
     smoltObs <- fdat$Smolts
@@ -109,10 +115,6 @@ createJAGSdata <- function(dataDir="",dataType="smolt",includeSmolt=TRUE,habType
     sexRatioInd <- which(!is.na(sexRatioObs))
     smoltInd <- which(!is.na(smoltObs))
     
-    # calculate the estimated proportion of hatchery origin fish 
-    #  this is based on females because we did not have the male hatchery fish numbers
-    pHOS <- fdat$FemaleParentsHatchery/(fdat$FemaleParentsHatchery + fdat$FemaleParentsWild)
-  
     # create year index for year effect
     yrRange <- range(fdat$BroodYear)
   

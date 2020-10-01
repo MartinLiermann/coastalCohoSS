@@ -5,6 +5,17 @@ date: "May 11, 2020"
 output: html_document
 ---
 
+```{r}
+# center drive working directory
+workDir <- "//nwcfile/home/liermannma/CurrentWorrk/consulting/sept2018_sept2019/oregonCoho"
+
+# local computer working directory
+workDir <-"C:\\Users\\Martin.Liermann\\Documents\\projects\\oregonCoho"
+
+dataDir <- paste(workDir,"data",sep="/")
+ 
+```
+
 ## Literature
 
 Note that it is difficult to make forcasts based on short time series. The best model was generally that last years value except for cyclic data like salmon.
@@ -24,15 +35,21 @@ from page 62 2020 preseason report they talk about using an ensemble of GAM mode
 
 I think this is table III-1 that Craig was refering to.
 
-![](../fromCraigFoster5_21_2020/modelResults_p62.png)
+```{r echo=FALSE,  out.width = '100%', warning=FALSE, message=FALSE}
+knitr::include_graphics(paste(workDir,"/fromCraigFoster5_21_2020/modelResults_p62.png",sep=""))
+```
+
 Here's table C4
 
-![](../fromCraigFoster5_21_2020/table C4.png)
+```{r echo=FALSE,  out.width = '100%', warning=FALSE, message=FALSE}
+knitr::include_graphics(paste(workDir,"/fromCraigFoster5_21_2020/table C4.png",sep=""))
+```
 
 Here's the management table (A4):
 
-![](../fromCraigFoster5_21_2020/table A4.png)
-
+```{r echo=FALSE,  out.width = '100%', warning=FALSE, message=FALSE}
+knitr::include_graphics(paste(workDir,"/fromCraigFoster5_21_2020/table A4.png",sep=""))
+```
 
 Based on the verbage below it looks like the use jack returns to the life cycle modeling sites. I'm just not sure how. Do they regress jacks/smolt against estimates of post season ocean survival from the smolt to adult returns for the LCM sites?
 

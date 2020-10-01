@@ -3,7 +3,7 @@
 #' @examples
 #' bmod <- createJAGScode()
 #' @export
-createJAGScode <- function(fixedObsError=NULL, smoltData=TRUE){
+createJAGScode <- function(fixedObsError=NULL, smoltData=TRUE, SRtype="BH3"){
   
   if(is.null(fixedObsError)){
     obsTau <- "
@@ -13,6 +13,16 @@ createJAGScode <- function(fixedObsError=NULL, smoltData=TRUE){
     obsTau <- paste(c("\n  smoltObsTau","  escObsTau"),fixedObsError^(-2),sep=" <- ", collapse="\n")  
   } else {
     stop("Error: fixedObsError should be NULL or a vector with two values")
+  }
+  
+  if(SRtype=="BH3"){
+    srFuncTxt <- "spawners[i]/(1/prod[stock[i]]^3 + spawners[i]^3/cap[stock[i]]^3)^(1/3)"
+  }else if(SRtype=="BH"){
+    srFuncTxt <- "spawners[i]/(1/prod[stock[i]] + spawners[i]/cap[stock[i]])"
+  }else if(SRtype=="HS"){
+    srFuncTxt <- "min(spawners[i]*prod[stock[i]],cap[stock[i]])"
+  }else{
+    stop("ERROR: unidentified SRtype")
   }
 
   if(smoltData){
@@ -52,7 +62,7 @@ model
   for(i in 1:N){ # iterate over all years and populations
 
     smolt[i] ~ dlnorm(log(muSmolt[i]), SRresidTau[stock[i]])
-    muSmolt[i] <- spawners[i]/(1/prod[stock[i]]^3 + spawners[i]^3/cap[stock[i]]^3)^(1/3) *
+    muSmolt[i] <- ",srFuncTxt," *
                  exp(yearEffect[year[i]])
 
     escapement[i] <- smolt[i] * oceanSurv[i] * (1 - HR[i])
@@ -115,7 +125,7 @@ model
   smoltText,"
   # escapement data
   for(i in 1:Nesc){
-    escapementObs[i] ~ dlnorm(log(spawnersWild[escInd[i]]),escObsTau)
+    escapementObs[i] ~ dlnorm(log(spawners[escInd[i]]),escObsTau)
   }
 ",obsTau,"
 
