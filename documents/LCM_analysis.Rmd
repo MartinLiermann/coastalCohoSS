@@ -1,0 +1,174 @@
+---
+title: "Oregeon Coastal LCM analysis"
+author: ""
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    theme: sandstone
+    highlight: tango 
+    toc: true
+    toc_float: true
+    code_folding: hide
+params:
+  runMod: FALSE
+  mcmcSims: 100000
+  SRfunc: "HS"
+  groupName: "LCM Coho"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+dataDir <- "//nwcfile/home/liermannma/CurrentWorrk/consulting/sept2018_sept2019/oregonCoho/data"
+dat <- read.csv(paste(dataDir,"/fishData.csv",sep=""))
+```
+
+# Todo
+
+-  I think I have a basic idea for the model. See the model description below. But, I still have to implement it. Maybe use the SONCC formulation. 
+
+# Summary
+
+In this document I will fit a model to the data from the 6 life cycle modeling (LCM) sites on the Oregon Coast. These tributaries have screw traps which enumerate out-migrating fry and smolt from the basins.
+
+Using this information in conjunction with spawners, harvest rates, and % hatchery origin allows us to fit a state space model to the data.
+
+In this version we include both fry and smolt and use a sex specific model.
+
+# Data
+
+## Natural origin female spawners vs brood year
+
+```{r fig.width=6, fig.height=8, warning=FALSE, message=FALSE}
+ggplot(dat,aes(x=BroodYear,y=FemaleParentsWild)) +
+  geom_line() +
+  geom_point() +
+  facet_grid(Site~.,scales="free_y")
+```
+
+## Fry migrants vs brood year
+
+```{r fig.width=6, fig.height=8, warning=FALSE, message=FALSE}
+ggplot(dat,aes(x=BroodYear,y=FryOutmigrant)) +
+  geom_line() +
+  geom_point() +
+  facet_grid(Site~.,scales="free_y")
+```
+
+## Smolt migrants vs brood year
+
+```{r fig.width=6, fig.height=8, warning=FALSE, message=FALSE}
+ggplot(dat,aes(x=BroodYear,y=Smolts)) +
+  geom_line() +
+  geom_point() +
+  facet_grid(Site~.,scales="free_y")
+```
+
+## smolt migrants vs female spawners
+
+```{r fig.width=9, fig.height=6, warning=FALSE, message=FALSE}
+ggplot(dat,aes(x=FemaleParentsWild+FemaleParentsHatchery,y=Smolts)) +
+  geom_point() +
+  facet_wrap(Site~.,scales="free")
+```
+
+## Fry migrants vs female spawners
+
+Not much evidence of density dependence for the spawner to fry out-migrant stage.
+
+```{r fig.width=9, fig.height=6, warning=FALSE, message=FALSE}
+ggplot(dat,aes(x=FemaleParentsWild+FemaleParentsHatchery,y=FryOutmigrant)) +
+  geom_point() +
+  facet_wrap(Site~.,scales="free")
+```
+
+## Fry migrants vs smolt migrants
+
+Not a ton of consistent pattern here. We would expect this to look somewhat similar to the spawner to smolt relationship since the fry appear to be more or less proportional to spawners.
+
+```{r fig.width=9, fig.height=6, warning=FALSE, message=FALSE}
+ggplot(dat,aes(x=FryOutmigrant,y=Smolts)) +
+  geom_point() +
+  facet_wrap(Site~.,scales="free")
+```
+
+# Model formulation
+
+## The model
+
+The data for each population is fit using a spawner-recruit function, where smolt are modeled as:
+
+$$smolt_y = {spawners_y \over {\left( {1 \over prod^3} + {spawners_y^3 \over cap^3} \right)^{1 \over 3}}} \cdot e^{\epsilon_y}$$
+where, $prod$ is the productivity parameter describing the slope at the origin, $cap$ is the capacity parameter defining asymptote for median recruits, and $\epsilon_y$ describes recruitment variability. 
+
+$$\epsilon_y \sim normal(0,\sigma)$$
+
+This function is a compromise between the hockey stick and Beverton Holt models.
+
+```{r fig.width=5, fig.height=5}
+ss <- seq(0,1000,by=1)
+srFunc <- function(ss,pp,cc) ss/(1/pp^3 + ss^3/cc^3)^(1/3)
+prod <- 2
+cap <- 500
+plot(ss,srFunc(ss,prod,cap),type="l",bty="l", xlab="Spawners", ylab="Recruits",xaxs="i",yaxs="i",xlim=c(0,600),ylim=c(0,600))
+lines(ss,pmin(prod*ss,cap),lty=3)
+lines(ss,ss/(1/prod+ss/cap),lty=2)
+lines(c(0,1000),c(0,1000),col="gray")
+legend("bottomright",lty=1:3, legend=c("This model","Beverton-Holt","hockey stick"))
+
+```
+
+Fry migrants leaving the basins in many cases out number the smolt migrants. Because these basins are tributaries, these fry may survive in sufficient numbers to comprise a biologically relevant proportion of the returning spawners. We therefore also model fry out migrants. Plots of fry out-migrants vs spawners for these populations suggests a linear relationship (i.e. no density dependence). We therefore model fry as:
+
+$$fry_y = m \times spawners_y $$
+
+NOTE: 
+
+-  should probably have a shared year effect for fry and smolt since I'm sure they co-vary due to good and bad years for spawning and egg to fry survival.
+-  Ideally we would model fry then apportion them to fry that stayed and fry the left the basin. However, this requires 3 parameters (productivity, proportion that leave, and fry to smolt survival) and two equations. 
+-  In other words. At a minimum you need some multiplier for spawners to get fry at trap and then you need a parameter to weight smolt and fry out-migrants (in this case a survival from fry to smolt for migrants).
+
+
+Here, $m$, is the product of fry per spawner and the fry out-migration rate.
+
+Finally, we account for fry to smolt mortality for these out-migrant fry and add them to the smolt that stayed in the basin.
+
+$$smolt_{total,y} = smolt_y + fry_y surv_f$$
+
+I imagine that $surv_f$ and ocean survival will be very confounded. Might need to just set this to a value. So, to add the fry data you need to add at least 2 and ideally three parameters.
+
+The population specific parameters, $prod$,$cap$, and $m$ are modeled hierarchically. Not sure how to deal with 
+
+Smolt capacity is assumed to be a function of population specific habitat variables ($hab_b$). Here we assume it is proportional to the habitat variable and each population has some lognormal deviation from the median value.
+
+$$cap_{b} \sim capSlope \cdot hab_{b} \cdot e^{\epsilon_h}$$
+
+$$\epsilon_h \sim normal(0,\sigma_h)$$
+
+For this first iteration we assume that all values of $hab_b$ are 1. This means that the parameter $capSlope$ is just the median of the capacity parameters.
+
+The population specific productivity parameters are assumed to come from a lognormal distribution.
+
+$$ln(prod_b) \sim normal(ln(\mu_{prod}),\sigma_{prod})$$
+
+The smolt are then multiplied by an ocean survival, $OS_y$ parameter that is allowed to vary by population and year and the harvest rate, $HR_y$, is applied. For the adult only data (the 21 OCN populations) we do not have smolt data so we set ocean survival to 1. This means that the productivity parameter now captures adult to adult vs adult to smolt.
+
+$$escapement_y = smolt_y OS_y (1-HR_y)$$
+
+We then account for hatchery origin fish using the proportion of hatchery origin fish, $pHOS$.
+
+$$spawners_y = escapement_y / (1-pHOS_y)$$
+
+This in turn feeds back to the next year.
+
+In the observation model we constrain the latent states, $escapement_y$ and $smolt_y$ using the observed data and a log normal observation model. 
+
+$$escapementObs_y \sim logN(escapement_y, \sigma_{esc})$$
+
+$$smoltObs_y \sim logN(smolt_y, \sigma_{smolt})$$
+
+If both the observation error for the smolts and adults and process error for recruitment residuals and ocean survival are population specific and free parameters, then these parameters will tend to be confounded. Therefore, we need to constrain one or the other. Here we fix observation error. While using incorrect observation error will likely result in biased results, this is likely better than ignoring observation error all together. We use an lognormal sigma of 0.15 which corresponds roughly to a CV of 15%. 
+
+Notice, in theory both observation and process error are estimable since process error affects the next generation while observatoin error does not.
+
+
