@@ -1,0 +1,111 @@
+
+model
+{
+  ###################################
+  ########### PROCESS MODEL #########
+  ###################################
+
+  for(i in 1:N){ # iterate over all years and populations
+
+    smoltRes[i] ~ dlnorm(log(muSmolt[i]), SRresidTau[stock[i]])
+    muSmolt[i] <- spawners[i]/(1/prod[stock[i]]^3 + spawners[i]^3/cap[stock[i]]^3)^(1/3) *
+                 exp(yearEffect[year[i]])
+    
+    fry[i] ~ dlnorm(log(fryProd[stock[i]]*spawners[i]), SRFresidTau[stock[i]])
+    
+    smolt[i] <- smoltRes[i] + fry[i] * winterSurv[stock[i]]
+
+    escapement[i] <- smolt[i] * oceanSurv[i] * (1 - HR[i])
+  
+    logit(oceanSurv[i]) <- oceanSurvL[i] + yearEffectOS[year[i]]
+    oceanSurvL[i] ~ dnorm(oceanSurvPopL[stock[i]], oceanSurvPopTau[stock[i]])
+  }
+
+  # offset escapement to produce spawners
+  # spawners are in calendar years and escapement are in brood years
+  for(pop in 1:Npops){
+    for(i in (escStartInd[pop]+3):escStopInd[pop]){
+      spawnersWild[i] <- escapement[i-3]
+      spawners[i] <- spawnersWild[i] / (1-pHOS[i])
+    }
+    # fill in the missing years with a vague prior
+    for(i in escStartInd[pop]:(escStartInd[pop]+2)){
+      spawnersWild[i]  ~ dlnorm(0,0.0001)
+      spawners[i] <- spawnersWild[i] / (1-pHOS[i])
+    }
+  }
+
+  ### population specific priors ###
+  for(pop in 1:Npops){
+    prod[pop] ~ dlnorm(logProdMu, logProdTau)
+    fryProd[pop] ~ dlnorm(logFryProdMu, logFryProdTau)
+    
+    cap[pop] ~ dlnorm(log(capSlope*habVar[pop]),logCapTau)
+    
+    logit(winterSurv[pop]) <- lwinterSurv[pop]
+    lwinterSurv[pop] ~ dnorm(-1, 0.1)
+
+    SRresidTau[pop] ~ dgamma(0.001,0.001)
+    SRresidSD[pop] <- 1.0/sqrt(SRresidTau[pop])
+    SRFresidTau[pop] ~ dgamma(0.001,0.001)
+    SRFresidSD[pop] <- 1.0/sqrt(SRFresidTau[pop])
+  
+    oceanSurvPopL[pop] ~ dnorm(oceanSurvMu, oceanSurvTau)
+    oceanSurvPopTau[pop] ~ dgamma(0.001,0.001)
+  }
+
+  ### Hyper-priors (i.e. priors describing the distributions of parameters that vary by population)
+  # productivity
+  logProdMu ~ dnorm(prodMuPrior[1],prodMuPrior[2])
+  logProdSD ~ dt(0,1,1)T(0,) # half cauchy with var=tau=sd=1 
+  logProdTau <- 1.0/(logProdSD*logProdSD)
+  logFryProdMu ~ dnorm(prodMuPrior[1],prodMuPrior[2])
+  logFryProdSD ~ dt(0,1,1)T(0,) # half cauchy with var=tau=sd=1 
+  logFryProdTau <- 1.0/(logFryProdSD*logFryProdSD)
+
+  # capacity
+  capSlope ~ dlnorm(capSlopePrior[1],capSlopePrior[2])
+  logCapSD ~ dt(0,1,1)T(0,)  # half cauchy with var=tau=sd=1 # dunif(0,10) #
+  logCapTau <- 1.0/(logCapSD*logCapSD)
+  
+  # ocean survival
+  oceanSurvMu ~ dnorm(oceanSurvMuPrior[1],oceanSurvMuPrior[2])
+  oceanSurvSD ~ dt(0,1,1)T(0,)  # half cauchy with var=tau=sd=1
+  oceanSurvTau <- pow(oceanSurvSD,-2)
+
+  ### year effects (SR resids), smolt residuals and ocean survival common to all populations
+  for(k in 1:Nyears){
+    yearEffectTmp[k] ~ dnorm(0,yearEffectTau)
+    yearEffect[k] <- yearEffectTmp[k]-mean(yearEffectTmp)
+    yearEffectTmpOS[k] ~ dnorm(0,yearEffectTauOS)
+    yearEffectOS[k] <- yearEffectTmpOS[k]-mean(yearEffectTmpOS)
+  }
+  yearEffectTau ~ dgamma(0.001,0.001)
+  yearEffectTauOS ~ dgamma(0.001,0.001)
+
+
+  #######################################
+  ########### OBSERVATION MODEL #########
+  #######################################
+
+  # smolt data
+  for(i in 1:Nsmolt){ # smolt trap count (spring)
+    smoltObs[i] ~ dlnorm(log(smolt[smoltInd[i]]),smoltObsTau)
+  }
+  
+  # fry data
+  for(i in 1:Nfry){ # fry trap count (spring)
+    fryObs[i] ~ dlnorm(log(fry[fryInd[i]]),fryObsTau)
+  }
+    
+  # escapement data
+  for(i in 1:Nesc){
+    escapementObs[i] ~ dlnorm(log(spawners[escInd[i]]),escObsTau)
+  }
+
+  smoltObsTau ~ dgamma(0.001,0.001)
+  fryObsTau ~ dgamma(0.001,0.001)
+  escObsTau ~ dgamma(0.001,0.001)
+
+ }
+

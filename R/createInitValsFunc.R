@@ -10,7 +10,7 @@
 ####################################################
 # WHAT I NEED TO DO NEXT
 ####################################################
-createInitValsFunc <- function(dat, includePlots=FALSE){
+createInitValsFunc <- function(dat, includePlots=FALSE,includeFry=FALSE){
   bdat <- dat$jagsDat
   sites <- dat$siteNames
   popNames <- tapply(names(bdat$stock),list(bdat$stock),unique)
@@ -34,6 +34,9 @@ createInitValsFunc <- function(dat, includePlots=FALSE){
       for(i in 1:length(sites)){
         smolt[bdat$stock==i] <- c(Rtemp[bdat$stock==i][-(1:3)],rep(NA,3))
       }
+    }
+    if(includeFry){
+      lwinterSurv <- rep(-5,bdat$Npops)
     }
     habVar <- bdat$habVar
 
@@ -64,6 +67,11 @@ createInitValsFunc <- function(dat, includePlots=FALSE){
         
       xx <- 0:round(max(srDat$S))
     }
+    fryProd <- rep(NA,bdat$Npops)
+    if(includeFry){
+      fObs <- rep(NA,bdat$N)
+      fObs[bdat$fryInd] <- bdat$fryObs
+    }
     for(st in 1:bdat$Npops){
       sInd <- srDat$stock==st
       xLim <- c(0,max(srDat$S[sInd]))
@@ -75,6 +83,12 @@ createInitValsFunc <- function(dat, includePlots=FALSE){
         lines(xx,srF(exp(r1$estimate),ss=xx),lwd=2,col=rgb(0.2,0.8,0.2,0.5))
         grid()
       }
+      if(includeFry){
+        fryProd[st] <- mean(fObs[bdat$stock==st]/bdat$escapementObs[bdat$stock==st],na.rm=TRUE)
+        fry <- rep(NA,bdat$N)
+        fry[bdat$fryInd] <- bdat$fryObs
+      }
+      
     }
 
     # now calculate the model specific parameters
@@ -97,7 +111,13 @@ createInitValsFunc <- function(dat, includePlots=FALSE){
       capSlope = capSlope,
       yearEffectTmp = rep(0,bdat$Nyears),
       yearEffectTmpOS = rep(0,bdat$Nyears)
-   )
+    )
+    if(includeFry) initList <- c(initList,
+      list(
+        lwinterSurv = rep(-4,bdat$Npops),
+        fry = fry,
+        fryProd = fryProd))
+    
     initList
   }
 }

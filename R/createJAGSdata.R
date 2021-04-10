@@ -8,7 +8,7 @@
 #' dat <- createJAGSprojectionData("data dir goes here")
 #'
 #' @export
-createJAGSdata <- function(dataDir="",dataType="smolt",includeSmolt=TRUE,habType="area"){
+createJAGSdata <- function(dataDir="",dataType="smolt",includeSmolt=TRUE,habType="area",femaleEsc=FALSE,includeFry=FALSE){
   #dataDir <- "Y:/sept2018_sept2019/oregonCoho/data"
 
   library(dplyr)
@@ -96,24 +96,31 @@ createJAGSdata <- function(dataDir="",dataType="smolt",includeSmolt=TRUE,habType
     # hatchery fish
     escapementObs <- (fdat$FemaleParentsWild + fdat$MaleParentsWild) / (1-pHOS)
     sexRatioObs <- fdat$FemaleParentsWild / escapementObs
-    
+
     # fill in missing sex ratios using within population average (males are missing for initial years)
     for(site in sites){
       sexRatioObs[is.na(sexRatioObs) & fdat$site==site] <- mean(sexRatioObs[fdat$site==site],na.rm=TRUE)
     }
- 
+    
     # use the filled in sex ratios to fill in total escapement 
     naInd <- is.na(escapementObs)
     escapementObs[naInd] <- (fdat$FemaleParentsWild[naInd] / sexRatioObs[naInd])/(1-pHOS[naInd]) 
+
+    # if femaleESc = TRUE then just use females for escapement
+    if(femaleEsc){
+      escapementObs <- fdat$FemaleParentsWild
+    }
     
     # smolt observations
     smoltObs <- fdat$Smolts
+    fryObs <- fdat$FryOutmigrant
     
     # create indices for the observed data (in case there are missing values).
     #  Here there should not be missing values.
     escInd <- which(!is.na(escapementObs))
     sexRatioInd <- which(!is.na(sexRatioObs))
     smoltInd <- which(!is.na(smoltObs))
+    fryInd <- which(!is.na(fryObs))
     
     # create year index for year effect
     yrRange <- range(fdat$BroodYear)
@@ -158,6 +165,11 @@ createJAGSdata <- function(dataDir="",dataType="smolt",includeSmolt=TRUE,habType
       jdat$Nsmolt <- length(smoltInd)
     }else{
       jdat$oceanSurv <- rep(1,length(pHOS))
+    }
+    if(includeFry){
+      jdat$fryObs <- fryObs[fryInd]
+      jdat$fryInd <- fryInd
+      jdat$Nfry <- length(fryInd)
     }
   } else {
     stop("Error: dataType must be smolt or OCN")
